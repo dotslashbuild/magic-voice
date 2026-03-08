@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.venv/
+build/
+dist/
+*.dmg
+.env
+
+# local agent tooling
+.agents/
+.claude/
+.omx/
+skills-lock.json
+
+# local planning/research docs
+internal-docs/
