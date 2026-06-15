@@ -102,8 +102,8 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
-    func startingEngineStatesShowNoBanner() {
-        for state in [TranscriptionEngineState.idle, .starting, .loadingModel, .transcribing] {
+    func nonTerminalEngineStatesShowNoBannerWhenSetupIsComplete() {
+        for state in [TranscriptionEngineState.idle, .starting, .transcribing] {
             let status = MenuBarStatusModel.derive(
                 missingPermissions: [],
                 engineState: state,
@@ -113,5 +113,47 @@ struct MenuBarStatusModelTests {
             )
             #expect(status.banner == nil)
         }
+    }
+
+    @Test
+    func setupRequiredShowsSettingUpBannerAndStatus() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            setupRequired: true,
+            engineState: .idle,
+            engineErrorReason: nil,
+            notchActive: false,
+            monitoringEnabled: true
+        )
+        #expect(status.statusWord == "Setting Up")
+        #expect(status.banner == .setup(message: "Setting up local speech model"))
+    }
+
+    @Test
+    func loadingModelShowsSettingUpEvenWhenSetupFlagIsComplete() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            setupRequired: false,
+            engineState: .loadingModel,
+            engineErrorReason: nil,
+            notchActive: false,
+            monitoringEnabled: true
+        )
+        #expect(status.statusWord == "Setting Up")
+        #expect(status.banner == .setup(message: "Setting up local speech model"))
+    }
+
+    @Test
+    func setupFailureStillShowsRetryableEngineBanner() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            setupRequired: true,
+            engineState: .unavailable,
+            engineErrorReason: "download failed",
+            notchActive: false,
+            monitoringEnabled: true
+        )
+        #expect(status.statusWord == "Error")
+        #expect(status.banner == .engine(message: "download failed"))
     }
 }

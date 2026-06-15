@@ -18,6 +18,7 @@ struct MenuBarStatus: Equatable {
 
     enum Banner: Equatable {
         case permissions(missing: [PermissionKind])
+        case setup(message: String)
         case engine(message: String)
     }
 
@@ -35,6 +36,7 @@ enum MenuBarStatusModel {
 
     static func derive(
         missingPermissions: [PermissionKind],
+        setupRequired: Bool = false,
         engineState: TranscriptionEngineState,
         engineErrorReason: String?,
         notchActive: Bool,
@@ -45,6 +47,8 @@ enum MenuBarStatusModel {
             banner = .permissions(missing: missingPermissions)
         } else if engineState == .unavailable {
             banner = .engine(message: engineErrorReason ?? "Transcription engine unavailable")
+        } else if setupRequired || engineState == .loadingModel {
+            banner = .setup(message: "Setting up local speech model")
         } else {
             banner = nil
         }
@@ -52,6 +56,8 @@ enum MenuBarStatusModel {
         let statusWord: String
         if notchActive {
             statusWord = "Recording"
+        } else if case .setup = banner {
+            statusWord = "Setting Up"
         } else if banner != nil {
             statusWord = "Error"
         } else {

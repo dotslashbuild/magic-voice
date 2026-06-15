@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 @main
 struct MagicVoiceApp: App {
@@ -18,6 +19,7 @@ struct MagicVoiceApp: App {
     @StateObject private var textInjector: TextInjector
     @StateObject private var transcriptionEngine: SidecarTranscriptionEngine
     @StateObject private var loginItemController: LoginItemController
+    @StateObject private var firstRunSetupController: FirstRunSetupController
 
     init() {
         let settings = SettingsStore()
@@ -27,6 +29,11 @@ struct MagicVoiceApp: App {
         audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
         let textInjector = TextInjector(permissionController: permissionController)
         let transcriptionEngine = SidecarTranscriptionEngine()
+        let firstRunSetupController = FirstRunSetupController(
+            settings: settings,
+            permissionController: permissionController,
+            engine: transcriptionEngine
+        )
         let dictationSession = DictationSession(
             settings: settings,
             notchManager: notchManager,
@@ -46,13 +53,11 @@ struct MagicVoiceApp: App {
         _audioCaptureManager = StateObject(wrappedValue: audioCaptureManager)
         _textInjector = StateObject(wrappedValue: textInjector)
         _transcriptionEngine = StateObject(wrappedValue: transcriptionEngine)
+        _firstRunSetupController = StateObject(wrappedValue: firstRunSetupController)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
         Task { @MainActor in
-            transcriptionEngine.startEngine(
-                model: settings.selectedModel,
-                language: settings.language
-            )
+            firstRunSetupController.evaluate()
             dictationSession.startHotkeyMonitoringOnLaunch()
         }
     }
@@ -67,6 +72,7 @@ struct MagicVoiceApp: App {
                 .environmentObject(dictationSession)
                 .environmentObject(textInjector)
                 .environmentObject(transcriptionEngine)
+                .environmentObject(firstRunSetupController)
         } label: {
             Image(nsImage: MenuBarGlyph.image(for: MenuBarStatusModel.glyph(
                 notchActive: notchManager.state != .collapsed,
@@ -86,5 +92,93 @@ struct MagicVoiceApp: App {
             .environmentObject(settings)
             .environmentObject(transcriptionEngine)
         }
+    }
+}
+
+@MainActor
+final class FirstRunSetupController: ObservableObject {
+    @Published private(set) var isSettingUp = false
+
+    private let settings: SettingsStore
+    private let permissionController: PermissionController
+    private let engine: SidecarTranscriptionEngine
+    private var setupModelInFlight: STTModel?
+    private var cancellables: Set<AnyCancellable> = []
+
+    init(
+        settings: SettingsStore,
+        permissionController: PermissionController,
+        engine: SidecarTranscriptionEngine
+    ) {
+        self.settings = settings
+        self.permissionController = permissionController
+        self.engine = engine
+
+        permissionController.$statuses
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        settings.$selectedModelRaw
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        settings.$language
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        engine.$engineState
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+    }
+
+    func evaluate() {
+        let model = settings.selectedModel
+
+        guard permissionController.allRequiredPermissionsGranted else {
+            isSettingUp = false
+            return
+        }
+
+        if settings.isSetupComplete(for: model) {
+            setupModelInFlight = nil
+            isSettingUp = false
+            if engine.engineState == .idle {
+                engine.startEngine(model: model, language: settings.language)
+            }
+            return
+        }
+
+        if setupModelInFlight == model && engine.engineState == .idle && engine.lastErrorReason == nil {
+            settings.markSetupComplete(for: model)
+            setupModelInFlight = nil
+            isSettingUp = false
+            engine.startEngine(model: model, language: settings.language)
+            return
+        }
+
+        if engine.engineState == .loadingModel {
+            isSettingUp = true
+            return
+        }
+
+        guard engine.engineState != .unavailable else {
+            isSettingUp = false
+            return
+        }
+
+        setupModelInFlight = model
+        isSettingUp = true
+        engine.downloadModel(model: model, language: settings.language)
+    }
+
+    func retry() {
+        guard permissionController.allRequiredPermissionsGranted else { return }
+        setupModelInFlight = nil
+        isSettingUp = false
+        engine.stopEngine()
+        evaluate()
     }
 }

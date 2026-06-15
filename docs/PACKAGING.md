@@ -2,11 +2,16 @@
 
 This project is a direct-distribution macOS app. It should not be shipped with App Sandbox enabled because global hotkeys, Accessibility text insertion, clipboard paste fallback, and the Python sidecar need process and system API access that are not App Store sandbox-friendly.
 
+The first public easy-install release should ship as a signed, notarized `.dmg` with the standard drag-to-Applications flow. Do not use a `.pkg` installer unless a future release needs privileged installation or preinstall steps.
+
+The first release should use manual updates: users download a replacement `.dmg` from the website or GitHub Releases. Defer Sparkle or any other automatic updater until signing, notarization, and first-run setup are stable.
+
 ## Xcode Settings
 
 - Product name/display name: `Magic Voice`
 - Current project deployment target: macOS 26.2
 - Intended public deployment target: verify before release and keep this file, README, and Xcode settings in sync
+- First public easy-install release hardware target: Apple Silicon Macs only.
 - App Sandbox: Off. The current project has no sandbox entitlement file.
 - Hardened Runtime: enable before Developer ID distribution. The current project file does not declare a hardened-runtime setting.
 - `LSUIElement`: `YES`
@@ -34,12 +39,7 @@ Developer builds resolve the sidecar launch plan through `SidecarRuntimeLocator`
 
 If `uv` is missing, it falls back to common `python3` locations. That fallback is useful for local debugging only: it does not install or lock Python dependencies. Public builds should use a managed or bundled `uv` path so dependency resolution stays reproducible.
 
-For a public build, choose one distribution strategy before notarization:
-
-- Bundle a signed Python runtime and virtual environment inside the app.
-- Bundle a signed `uv` executable and let the app create a managed Python/venv under Application Support.
-- Ship a first-run installer/bootstrapper that installs `uv` and resolves dependencies after explicit user consent.
-- Replace the Python sidecar with a native Swift/Core ML runtime later.
+For the first public easy-install build, bundle a signed `uv` executable and let the app create a managed Python/venv under Application Support. This keeps the user-facing install path no-terminal while staying close to the current sidecar architecture. Fully bundling Python or replacing the sidecar with a native Swift/Core ML runtime can be revisited after the first public install path works.
 
 Do not publish a binary until this decision is implemented and tested on a clean macOS account.
 
@@ -59,7 +59,14 @@ The repository license covers this project's source code. It does not automatica
 Release notes and onboarding should disclose:
 
 - Audio and transcription run locally after model/dependency download.
-- First use downloads Python dependencies and the selected STT model.
+- First run downloads Python dependencies and the selected STT model into Application Support rather than bundling the model inside the `.dmg`.
+- During first-run setup, dictation should stay blocked behind one clear setup state until Python dependencies and the speech model are ready. Show percentage progress only if it is reliable; otherwise show an indeterminate setup state with failure and retry.
+- The menu-bar status model should show setup explicitly as `Setting Up`, not `Ready`; permissions remain the highest-priority banner, setup is second, and ready appears only after the engine/model path is usable.
+- First-run setup should start automatically after the required Microphone and Accessibility permissions are granted, with a visible failure and retry path instead of a separate setup button.
+- Track setup completion per selected speech model using the model's stable identifier. Set the marker only after Python dependencies and the selected model download complete successfully; failed setup should leave the marker unset and show retry.
+- If the user switches to a model without a completed setup marker, Magic Voice should re-enter the same setup flow for that model. Switching back to a model with a completed setup marker should not repeat setup.
+- The first-run path should use the default speech model without asking the user to choose. Keep alternate models in Settings for later, not in the install flow.
+- First-run guidance should live inside the existing menu-bar popover as a compact checklist/status flow, not in a separate welcome window.
 - The fallback injector temporarily replaces the clipboard and restores it after paste.
 - The fn activation-key path temporarily changes the user-wide `com.apple.HIToolbox AppleFnUsageType` preference to avoid Apple Dictation conflicts, then restores the saved value on normal release and next-launch recovery.
 

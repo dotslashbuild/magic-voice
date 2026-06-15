@@ -15,6 +15,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var audioCaptureManager: AudioCaptureManager
     @EnvironmentObject private var dictationSession: DictationSession
     @EnvironmentObject private var transcriptionEngine: SidecarTranscriptionEngine
+    @EnvironmentObject private var firstRunSetupController: FirstRunSetupController
 
     @State private var showPermissionDetails = false
     @State private var copiedEntryID: UUID?
@@ -24,6 +25,7 @@ struct MenuBarView: View {
             missingPermissions: PermissionKind.allCases.filter {
                 !permissionController.status(for: $0).isGranted
             },
+            setupRequired: !settings.isSetupComplete(for: settings.selectedModel),
             engineState: transcriptionEngine.engineState,
             engineErrorReason: transcriptionEngine.lastErrorReason,
             notchActive: notchManager.state != .collapsed,
@@ -50,6 +52,7 @@ struct MenuBarView: View {
             audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
             audioCaptureManager.refreshInputDevices()
             permissionController.refresh()
+            firstRunSetupController.evaluate()
         }
     }
 
@@ -104,12 +107,31 @@ struct MenuBarView: View {
                         .lineLimit(3)
                     Spacer()
                     Button("Retry") {
-                        transcriptionEngine.restartEngine(
-                            model: settings.selectedModel,
-                            language: settings.language
-                        )
+                        if settings.isSetupComplete(for: settings.selectedModel) {
+                            transcriptionEngine.restartEngine(
+                                model: settings.selectedModel,
+                                language: settings.language
+                            )
+                        } else {
+                            firstRunSetupController.retry()
+                        }
                     }
                     .controlSize(.small)
+                }
+
+            case .setup(let message):
+                HStack(alignment: .center, spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(message)
+                            .font(.callout)
+                        Text("This can take a few minutes the first time.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
                 }
             }
         }
@@ -284,6 +306,11 @@ struct MenuBarView: View {
     let audioCaptureManager = AudioCaptureManager(permissionController: permissionController)
     let textInjector = TextInjector(permissionController: permissionController)
     let transcriptionEngine = SidecarTranscriptionEngine()
+    let firstRunSetupController = FirstRunSetupController(
+        settings: settings,
+        permissionController: permissionController,
+        engine: transcriptionEngine
+    )
 
     MenuBarView()
         .environmentObject(settings)
@@ -291,6 +318,7 @@ struct MenuBarView: View {
         .environmentObject(permissionController)
         .environmentObject(audioCaptureManager)
         .environmentObject(transcriptionEngine)
+        .environmentObject(firstRunSetupController)
         .environmentObject(DictationSession(
             settings: settings,
             notchManager: notchManager,

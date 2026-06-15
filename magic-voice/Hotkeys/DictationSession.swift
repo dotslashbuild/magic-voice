@@ -230,6 +230,12 @@ final class DictationSession: ObservableObject {
     }
 
     private func startRecording(mode: TriggerMode, reason: String) {
+        guard settings.isSetupComplete(for: settings.selectedModel) else {
+            lastHotkeyEventDescription = "Setting up speech model"
+            discardPreroll()
+            return
+        }
+
         guard audioCaptureManager.lastError == nil else {
             discardPreroll()
             return
