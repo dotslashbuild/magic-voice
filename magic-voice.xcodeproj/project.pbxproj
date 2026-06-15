@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		243B05F72F5D845700798C35 /* sidecar.py in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F52F5D845700798C35 /* sidecar.py */; };
 		243B05F82F5D845700798C35 /* pyproject.toml in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F62F5D845700798C35 /* pyproject.toml */; };
+		243B06002F5D845700798C35 /* uv.lock in Resources */ = {isa = PBXBuildFile; fileRef = 243B05FF2F5D845700798C35 /* uv.lock */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +26,7 @@
 		243B05F12F5D845700798C35 /* Magic Voice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Magic Voice.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		243B05F52F5D845700798C35 /* sidecar.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = sidecar.py; sourceTree = "<group>"; };
 		243B05F62F5D845700798C35 /* pyproject.toml */ = {isa = PBXFileReference; lastKnownFileType = text; path = pyproject.toml; sourceTree = "<group>"; };
+		243B05FF2F5D845700798C35 /* uv.lock */ = {isa = PBXFileReference; lastKnownFileType = text; path = uv.lock; sourceTree = "<group>"; };
 		AA1B05000000000000000001 /* magic-voiceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "magic-voiceTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -79,6 +81,7 @@
 			children = (
 				243B05F52F5D845700798C35 /* sidecar.py */,
 				243B05F62F5D845700798C35 /* pyproject.toml */,
+				243B05FF2F5D845700798C35 /* uv.lock */,
 			);
 			path = sidecar;
 			sourceTree = "<group>";
@@ -93,6 +96,7 @@
 				243B05ED2F5D845700798C35 /* Sources */,
 				243B05EE2F5D845700798C35 /* Frameworks */,
 				243B05EF2F5D845700798C35 /* Resources */,
+				243B06012F5D845700798C35 /* Copy Bundled uv Runtime */,
 			);
 			buildRules = (
 			);
@@ -170,6 +174,7 @@
 			files = (
 				243B05F72F5D845700798C35 /* sidecar.py in Resources */,
 				243B05F82F5D845700798C35 /* pyproject.toml in Resources */,
+				243B06002F5D845700798C35 /* uv.lock in Resources */,
 			);
 		};
 		AA1B05000000000000000012 /* Resources */ = {
@@ -178,6 +183,29 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		243B06012F5D845700798C35 /* Copy Bundled uv Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/build/uv-runtime/uv",
+			);
+			name = "Copy Bundled uv Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/uv",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\nUV_RUNTIME=\"${SRCROOT}/build/uv-runtime/uv\"\nDESTINATION=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/uv\"\n\nif [ ! -x \"${UV_RUNTIME}\" ]; then\n  if [ \"${REQUIRE_BUNDLED_UV:-NO}\" = \"YES\" ]; then\n    echo \"error: staged uv runtime is missing or not executable: ${UV_RUNTIME}\" >&2\n    echo \"Run scripts/stage_uv_runtime.sh before building product apps, or unset REQUIRE_BUNDLED_UV for local Debug builds.\" >&2\n    exit 1\n  fi\n  echo \"warning: staged uv runtime is missing or not executable: ${UV_RUNTIME}; skipping bundled uv copy\" >&2\n  exit 0\nfi\n\nmkdir -p \"$(dirname \"${DESTINATION}\")\"\ninstall -m 755 \"${UV_RUNTIME}\" \"${DESTINATION}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		243B05ED2F5D845700798C35 /* Sources */ = {

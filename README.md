@@ -26,11 +26,17 @@ Hold `fn` to dictate. Double-tap `fn` to start and stop. Keep writing.
 | Permissions | Microphone and Accessibility only |
 | Privacy | No audio upload in the current local engine path |
 | Menu bar | Compact control center, recent transcripts, microphone/language/shortcut pickers |
-| Runtime | Developer `uv` flow works; packaged runtime is still pending |
+| Runtime | Developer `uv` flow works; public packaged runtime is in progress |
+
+## Public Install Status
+
+A signed public download is not ready yet. The first public install target is a signed and notarized DMG for Apple Silicon Macs, with a drag-to-Applications flow and manual updates from the website or GitHub Releases.
+
+Public builds are intended to be no-terminal: users should not need Homebrew, Xcode, or `uv` installed. On first run, Magic Voice will download its managed Python environment and the selected speech model into Application Support before dictation becomes available. The default model is about 1.2 GB.
 
 ## Quick Start
 
-Magic Voice is ready for local development. A signed public installer is not ready yet.
+Magic Voice is ready for local development. A signed public DMG is not ready yet, so these steps are for developers working from source.
 
 1. Install [`uv`](https://docs.astral.sh/uv/):
 
@@ -56,7 +62,7 @@ On the first dictation after a clean clone, the sidecar downloads the default sp
 mlx-community/nemotron-3.5-asr-streaming-0.6b
 ```
 
-The model is about 1.2 GB. Apple Silicon is strongly recommended.
+The model is about 1.2 GB. Apple Silicon is required for the first public install target and strongly recommended for development.
 
 ## Requirements
 
@@ -84,7 +90,7 @@ The near-term goal is simple: make Magic Voice as easy to try as the polished co
 
 | Priority | Pending work |
 |---|---|
-| Release | Signed app, notarized DMG, bundled or managed `uv`, Homebrew cask |
+| Release | Signed app, notarized DMG, bundled or managed `uv`, manual download updates |
 | First run | Friendly onboarding, model download progress, permission recovery |
 | Writing quality | Cleanup mode, filler removal, punctuation polish, custom dictionary |
 | Power use | App-aware modes, selected-text edit mode, context-aware correction |

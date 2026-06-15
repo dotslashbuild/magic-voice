@@ -17,14 +17,22 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Stage bundled uv runtime
+        run: scripts/stage_uv_runtime.sh
+
       - name: Build (no code signing)
         run: |
           xcodebuild \
             -project magic-voice.xcodeproj \
             -scheme magic-voice \
             -configuration Debug \
+            -derivedDataPath "${RUNNER_TEMP}/magicvoice-derived-data" \
             build \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            REQUIRE_BUNDLED_UV=YES
+
+      - name: Verify packaged app resources
+        run: scripts/verify_app_resources.sh "${RUNNER_TEMP}/magicvoice-derived-data/Build/Products/Debug/Magic Voice.app"
 
       - name: Run tests
         run: |
