@@ -29,8 +29,13 @@ struct MenuBarStatus: Equatable {
 
 enum MenuBarStatusModel {
 
-    static func glyph(notchActive: Bool, monitoringEnabled: Bool) -> MenuBarStatus.Glyph {
+    static func glyph(
+        notchActive: Bool,
+        monitoringEnabled: Bool,
+        setupPaused: Bool = false
+    ) -> MenuBarStatus.Glyph {
         if notchActive { return .recording }
+        if setupPaused { return .paused }
         return monitoringEnabled ? .idle : .paused
     }
 
@@ -56,6 +61,8 @@ enum MenuBarStatusModel {
         let statusWord: String
         if notchActive {
             statusWord = "Recording"
+        } else if engineState == .loadingModel {
+            statusWord = "Paused"
         } else if case .setup = banner {
             statusWord = "Setting Up"
         } else if banner != nil {
@@ -66,7 +73,11 @@ enum MenuBarStatusModel {
 
         return MenuBarStatus(
             statusWord: statusWord,
-            glyph: glyph(notchActive: notchActive, monitoringEnabled: monitoringEnabled),
+            glyph: glyph(
+                notchActive: notchActive,
+                monitoringEnabled: monitoringEnabled,
+                setupPaused: engineState == .loadingModel
+            ),
             banner: banner
         )
     }

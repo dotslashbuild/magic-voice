@@ -130,7 +130,7 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
-    func loadingModelShowsSettingUpEvenWhenSetupFlagIsComplete() {
+    func loadingModelShowsPausedStateWithSetupBanner() {
         let status = MenuBarStatusModel.derive(
             missingPermissions: [],
             setupRequired: false,
@@ -139,7 +139,8 @@ struct MenuBarStatusModelTests {
             notchActive: false,
             monitoringEnabled: true
         )
-        #expect(status.statusWord == "Setting Up")
+        #expect(status.statusWord == "Paused")
+        #expect(status.glyph == .paused)
         #expect(status.banner == .setup(message: "Setting up local speech model"))
     }
 

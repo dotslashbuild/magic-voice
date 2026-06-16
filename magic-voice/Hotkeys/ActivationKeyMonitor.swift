@@ -135,6 +135,15 @@ final class ActivationKeyMonitor: ObservableObject {
         lastEventDescription = "Hotkey monitoring paused"
     }
 
+    /// Stop monitoring for an app-owned temporary suspension. Unlike `pause()`,
+    /// this preserves the user's resume preference so setup can auto-resume.
+    func suspend(reason: String) {
+        hotkeyManager.stop()
+        isEnabled = false
+        syncConflictClaim()
+        lastEventDescription = reason
+    }
+
     /// React to an activation-key change: retarget the HotkeyManager and, if
     /// currently monitoring, stop/restart it so the new key takes effect.
     func activationKeyDidChange() {

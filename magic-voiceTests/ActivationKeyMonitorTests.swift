@@ -133,6 +133,20 @@ struct ActivationKeyMonitorTests {
     }
 
     @Test
+    func setupSuspendCanAutoResumeWhenPermitted() {
+        let (monitor, hotkey, _, _) = makeMonitor(granted: true)
+        monitor.enable()
+
+        monitor.suspend(reason: "Setting up speech model")
+        #expect(monitor.isEnabled == false)
+        #expect(hotkey.stopCalls == 1)
+
+        monitor.enableIfPermitted()
+        #expect(monitor.isEnabled)
+        #expect(hotkey.startCalls == 2)
+    }
+
+    @Test
     func enableIfPermittedStartsWhenNotPaused() {
         let (monitor, hotkey, _, _) = makeMonitor(granted: true)
 

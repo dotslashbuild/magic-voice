@@ -16,6 +16,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var dictationSession: DictationSession
     @EnvironmentObject private var transcriptionEngine: SidecarTranscriptionEngine
     @EnvironmentObject private var firstRunSetupController: FirstRunSetupController
+    @Environment(\.openSettings) private var openSettings
 
     @State private var showPermissionDetails = false
     @State private var copiedEntryID: UUID?
@@ -265,7 +266,9 @@ struct MenuBarView: View {
 
     private var footer: some View {
         HStack {
-            SettingsLink {
+            Button {
+                showSettingsWindow()
+            } label: {
                 Label("Settings…", systemImage: "gearshape")
             }
             .buttonStyle(.borderless)
@@ -279,6 +282,17 @@ struct MenuBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
+    }
+
+    private func showSettingsWindow() {
+        openSettings()
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            for window in NSApp.windows where window.title == "Settings" {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+            }
+        }
     }
 
     // MARK: – Helpers
