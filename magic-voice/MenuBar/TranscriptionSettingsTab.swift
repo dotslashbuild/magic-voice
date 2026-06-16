@@ -10,6 +10,7 @@ import SwiftUI
 struct TranscriptionSettingsTab: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var engine: SidecarTranscriptionEngine
+    @EnvironmentObject private var firstRunSetupController: FirstRunSetupController
 
     var body: some View {
         Form {
@@ -30,9 +31,11 @@ struct TranscriptionSettingsTab: View {
                     Button("Restart") {
                         engine.restartEngine(model: settings.selectedModel, language: settings.language)
                     }
+                    .disabled(engine.engineState == .loadingModel)
                     Button("Download Model") {
-                        engine.downloadModel(model: settings.selectedModel, language: settings.language)
+                        firstRunSetupController.downloadSelectedModel()
                     }
+                    .disabled(engine.engineState == .loadingModel)
                 }
                 if let reason = engine.lastErrorReason {
                     Text(reason)

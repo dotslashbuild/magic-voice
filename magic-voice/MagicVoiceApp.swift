@@ -91,6 +91,7 @@ struct MagicVoiceApp: App {
             }
             .environmentObject(settings)
             .environmentObject(transcriptionEngine)
+            .environmentObject(firstRunSetupController)
         }
     }
 }
@@ -132,30 +133,38 @@ final class FirstRunSetupController: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.evaluate() }
             .store(in: &cancellables)
+
+        engine.$completedModelDownload
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
     }
 
     func evaluate() {
+        markCompletedSetupIfNeeded()
+
         let model = settings.selectedModel
 
         guard permissionController.allRequiredPermissionsGranted else {
-            isSettingUp = false
+            isSettingUp = setupModelInFlight != nil && engine.engineState == .loadingModel
             return
         }
 
         if settings.isSetupComplete(for: model) {
+            if let setupModelInFlight, setupModelInFlight != model {
+                isSettingUp = engine.engineState == .loadingModel
+                return
+            }
+            if engine.engineState == .loadingModel {
+                isSettingUp = true
+                return
+            }
+
             setupModelInFlight = nil
             isSettingUp = false
             if engine.engineState == .idle {
                 engine.startEngine(model: model, language: settings.language)
             }
-            return
-        }
-
-        if setupModelInFlight == model && engine.engineState == .idle && engine.lastErrorReason == nil {
-            settings.markSetupComplete(for: model)
-            setupModelInFlight = nil
-            isSettingUp = false
-            engine.startEngine(model: model, language: settings.language)
             return
         }
 
@@ -174,11 +183,33 @@ final class FirstRunSetupController: ObservableObject {
         engine.downloadModel(model: model, language: settings.language)
     }
 
+    func downloadSelectedModel() {
+        guard engine.engineState != .loadingModel else {
+            isSettingUp = setupModelInFlight != nil
+            return
+        }
+
+        setupModelInFlight = settings.selectedModel
+        isSettingUp = true
+        engine.downloadModel(model: settings.selectedModel, language: settings.language)
+    }
+
     func retry() {
         guard permissionController.allRequiredPermissionsGranted else { return }
         setupModelInFlight = nil
         isSettingUp = false
         engine.stopEngine()
         evaluate()
+    }
+
+    private func markCompletedSetupIfNeeded() {
+        guard let completedModel = setupModelInFlight,
+              engine.completedModelDownload?.model == completedModel else {
+            return
+        }
+
+        settings.markSetupComplete(for: completedModel)
+        setupModelInFlight = nil
+        isSettingUp = false
     }
 }
