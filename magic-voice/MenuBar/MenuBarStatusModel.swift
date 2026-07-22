@@ -51,7 +51,7 @@ enum MenuBarStatusModel {
         if !missingPermissions.isEmpty {
             banner = .permissions(missing: missingPermissions)
         } else if engineState == .unavailable {
-            banner = .engine(message: engineErrorReason ?? "Transcription engine unavailable")
+            banner = .engine(message: "Speech engine needs attention")
         } else if setupRequired || engineState == .loadingModel {
             banner = .setup(message: "Setting up local speech model")
         } else {

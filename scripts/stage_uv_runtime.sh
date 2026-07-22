@@ -26,6 +26,8 @@ if [[ ! -f "${ARCHIVE_PATH}" ]]; then
   download_path="${ARCHIVE_PATH}.download"
   rm -f "${download_path}"
   curl --fail --location --proto '=https' --tlsv1.2 \
+    --retry 5 --retry-all-errors --retry-delay 2 \
+    --connect-timeout 15 --max-time 600 \
     --output "${download_path}" \
     "${UV_BASE_URL}/${UV_ARCHIVE}"
   mv "${download_path}" "${ARCHIVE_PATH}"

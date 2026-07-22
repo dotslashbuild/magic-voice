@@ -65,7 +65,7 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
-    func unavailableEngineProducesEngineBannerWithReason() {
+    func unavailableEngineShowsUserFacingEngineBanner() {
         let status = MenuBarStatusModel.derive(
             missingPermissions: [],
             engineState: .unavailable,
@@ -74,11 +74,11 @@ struct MenuBarStatusModelTests {
             monitoringEnabled: true
         )
         #expect(status.statusWord == "Error")
-        #expect(status.banner == .engine(message: "Install uv: brew install uv"))
+        #expect(status.banner == .engine(message: "Speech engine needs attention"))
     }
 
     @Test
-    func unavailableEngineWithoutReasonUsesFallbackMessage() {
+    func unavailableEngineWithoutReasonUsesSameUserFacingMessage() {
         let status = MenuBarStatusModel.derive(
             missingPermissions: [],
             engineState: .unavailable,
@@ -86,7 +86,7 @@ struct MenuBarStatusModelTests {
             notchActive: false,
             monitoringEnabled: true
         )
-        #expect(status.banner == .engine(message: "Transcription engine unavailable"))
+        #expect(status.banner == .engine(message: "Speech engine needs attention"))
     }
 
     @Test
@@ -155,6 +155,6 @@ struct MenuBarStatusModelTests {
             monitoringEnabled: true
         )
         #expect(status.statusWord == "Error")
-        #expect(status.banner == .engine(message: "download failed"))
+        #expect(status.banner == .engine(message: "Speech engine needs attention"))
     }
 }

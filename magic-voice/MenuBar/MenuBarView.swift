@@ -18,7 +18,6 @@ struct MenuBarView: View {
     @EnvironmentObject private var firstRunSetupController: FirstRunSetupController
     @Environment(\.openSettings) private var openSettings
 
-    @State private var showPermissionDetails = false
     @State private var copiedEntryID: UUID?
 
     private var status: MenuBarStatus {
@@ -40,6 +39,10 @@ struct MenuBarView: View {
             if let banner = status.banner {
                 healthBanner(banner)
             }
+            if hasMissingAccess {
+                permissionAccessSection
+                Divider()
+            }
             hintRow
             Divider()
             quickControls
@@ -48,7 +51,7 @@ struct MenuBarView: View {
             Divider()
             footer
         }
-        .frame(width: 300)
+        .frame(width: 340)
         .onAppear {
             audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
             audioCaptureManager.refreshInputDevices()
@@ -92,12 +95,6 @@ struct MenuBarView: View {
                     }
                     .controlSize(.small)
                 }
-                DisclosureGroup("Details", isExpanded: $showPermissionDetails) {
-                    PermissionsView()
-                        .padding(.top, 4)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
 
             case .engine(let message):
                 HStack(alignment: .top, spacing: 8) {
@@ -142,15 +139,34 @@ struct MenuBarView: View {
         .padding(.bottom, 8)
     }
 
+    private var permissionAccessSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Access Needed", systemImage: "lock.open")
+
+            ForEach(missingPermissions) { kind in
+                permissionRow(for: kind)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
     private var hintRow: some View {
-        HStack(spacing: 6) {
-            Text("Hold")
-            Text(settings.activationKey.displayName)
-                .font(.caption.monospaced())
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(.tertiary, lineWidth: 0.5))
-            Text("to dictate · double-tap to toggle")
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("Hold")
+                    Text(settings.activationKey.displayName)
+                        .font(.caption.monospaced())
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(.tertiary, lineWidth: 0.5))
+                    Text("to dictate")
+                }
+                Text("Double-tap to start or stop hands-free dictation.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
             Button(dictationSession.hotkeyMonitoringEnabled ? "Pause" : "Resume") {
                 dictationSession.toggleHotkeyMonitoring()
@@ -161,18 +177,25 @@ struct MenuBarView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 14)
-        .padding(.bottom, 9)
+        .padding(.vertical, 9)
     }
 
     private var quickControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            pickerRow(title: "Microphone", value: Binding(
-                get: { settings.selectedMicrophoneID },
-                set: {
-                    settings.selectedMicrophoneID = $0
-                    audioCaptureManager.selectedInputDeviceID = $0
-                }
-            )) {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Controls", systemImage: "slider.horizontal.3")
+
+            controlPickerRow(
+                title: "Microphone",
+                detail: audioCaptureManager.displayName(forInputDeviceID: settings.selectedMicrophoneID),
+                systemImage: "mic",
+                value: Binding(
+                    get: { settings.selectedMicrophoneID },
+                    set: {
+                        settings.selectedMicrophoneID = $0
+                        audioCaptureManager.selectedInputDeviceID = $0
+                    }
+                )
+            ) {
                 ForEach(audioCaptureManager.availableInputDevices) { device in
                     Text(device.isAuto
                          ? audioCaptureManager.displayName(forInputDeviceID: device.id)
@@ -181,7 +204,12 @@ struct MenuBarView: View {
                 }
             }
 
-            pickerRow(title: "Language", value: $settings.language) {
+            controlPickerRow(
+                title: "Language",
+                detail: languageDisplayName(for: settings.language),
+                systemImage: "globe",
+                value: $settings.language
+            ) {
                 Text("Auto").tag("auto")
                 Text("English").tag("en")
                 Text("Spanish").tag("es")
@@ -189,7 +217,12 @@ struct MenuBarView: View {
                 Text("German").tag("de")
             }
 
-            pickerRow(title: "Shortcut", value: $settings.activationKey) {
+            controlPickerRow(
+                title: "Shortcut",
+                detail: settings.activationKey.displayName,
+                systemImage: "keyboard",
+                value: $settings.activationKey
+            ) {
                 ForEach(ActivationKey.allCases) { key in
                     Text(key.displayName).tag(key)
                 }
@@ -297,18 +330,91 @@ struct MenuBarView: View {
 
     // MARK: – Helpers
 
-    private func pickerRow<Value: Hashable, Content: View>(
+    private func controlPickerRow<Value: Hashable, Content: View>(
         title: String,
+        detail: String,
+        systemImage: String,
         value: Binding<Value>,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            Picker("", selection: value) { content() }
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.callout)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 12)
+            Picker(title, selection: value) { content() }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(maxWidth: 170)
+                .controlSize(.small)
+                .frame(width: 94)
+        }
+        .frame(minHeight: 34)
+    }
+
+    private func sectionHeader(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func permissionRow(for kind: PermissionKind) -> some View {
+        let status = permissionController.status(for: kind)
+        return HStack(alignment: .top, spacing: 9) {
+            Image(systemName: kind == .microphone ? "mic" : "accessibility")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(status.color)
+                .frame(width: 18)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(kind.displayName)
+                        .font(.callout)
+                    Text(status.title)
+                        .font(.caption2)
+                        .foregroundStyle(status.color)
+                    Spacer()
+                }
+                Text(kind == .microphone ? "Lets Magic Voice hear dictation." : "Places text where your cursor is.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Button(kind == .microphone ? "Allow" : "Open") {
+                permissionController.request(kind)
+            }
+            .controlSize(.mini)
+        }
+    }
+
+    private var missingPermissions: [PermissionKind] {
+        PermissionKind.allCases.filter {
+            !permissionController.status(for: $0).isGranted
+        }
+    }
+
+    private var hasMissingAccess: Bool {
+        !missingPermissions.isEmpty
+    }
+
+    private func languageDisplayName(for code: String) -> String {
+        switch code {
+        case "auto": return "Auto"
+        case "en": return "English"
+        case "es": return "Spanish"
+        case "fr": return "French"
+        case "de": return "German"
+        default:
+            return code.uppercased()
         }
     }
 }
@@ -331,6 +437,7 @@ struct MenuBarView: View {
         .environmentObject(notchManager)
         .environmentObject(permissionController)
         .environmentObject(audioCaptureManager)
+        .environmentObject(textInjector)
         .environmentObject(transcriptionEngine)
         .environmentObject(firstRunSetupController)
         .environmentObject(DictationSession(

@@ -299,6 +299,11 @@ final class DictationSession: ObservableObject {
     }
 
     private func stopRecording(reason: String, shouldInjectTranscript: Bool = true) {
+        guard triggerMode != .idle else {
+            discardPreroll()
+            return
+        }
+
         triggerMode = .idle
         lastHotkeyEventDescription = reason
         recordingSessionShouldInjectTranscript = shouldInjectTranscript

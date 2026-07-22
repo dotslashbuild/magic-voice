@@ -379,7 +379,9 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
 
             let logURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("magic-voice-sidecar-\(UUID().uuidString).log")
-            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+            guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
+                throw SidecarError.message("Failed to create temporary log file at \(logURL.path)")
+            }
             let logFile = try FileHandle(forUpdating: logURL)
             defer {
                 try? logFile.close()
