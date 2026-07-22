@@ -98,12 +98,16 @@ protocol RuntimeProcessRunning: Sendable {
 
 struct FoundationRuntimeProcessRunner: RuntimeProcessRunning {
     nonisolated func run(_ request: RuntimeProcessRequest) async throws -> RuntimeProcessResult {
-        try await withCheckedThrowingContinuation { continuation in
+        let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+            executableURL: request.executableURL,
+            arguments: request.arguments
+        )
+        return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             let standardError = Pipe()
             let errorBuffer = RuntimeProcessOutputBuffer()
-            process.executableURL = request.executableURL
-            process.arguments = request.arguments
+            process.executableURL = supervisedPlan.executableURL
+            process.arguments = supervisedPlan.arguments
             process.currentDirectoryURL = request.workingDirectoryURL
             process.environment = ProcessInfo.processInfo.environment
                 .merging(request.environment) { _, new in new }

@@ -11,9 +11,31 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let terminationController = ApplicationTerminationController()
+    private var processSupervisorSmokeRunner: ProcessSupervisorHostDeathSmokeRunner?
+
+    func installApplicationTerminationHandler(_ handler: @escaping () async -> Void) {
+        terminationController.install(handler)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        if let request = parseProcessSupervisorHostDeathSmokeRequest(
+            arguments: ProcessInfo.processInfo.arguments
+        ) {
+            do {
+                let runner = ProcessSupervisorHostDeathSmokeRunner()
+                try runner.launch(request)
+                processSupervisorSmokeRunner = runner
+            } catch {
+                FileHandle.standardError.write(
+                    Data("process supervisor smoke launch failed: \(error.localizedDescription)\n".utf8)
+                )
+                exit(EXIT_FAILURE)
+            }
+            return
+        }
 
         guard let launchMode = parseSidecarSmokeLaunchMode(
             arguments: ProcessInfo.processInfo.arguments
@@ -59,5 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        terminationController.shouldTerminate { accepted in
+            sender.reply(toApplicationShouldTerminate: accepted)
+        }
     }
 }

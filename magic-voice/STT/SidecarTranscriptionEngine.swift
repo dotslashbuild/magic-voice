@@ -26,6 +26,7 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     @Published private(set) var currentLanguage: String?
 
     private var transcriptionTask: Task<Void, Never>?
+    private var engineStartTask: Task<Void, Never>?
     private var sidecarProcess: Process?
     private var sidecarInput: Pipe?
     private var sidecarOutput: Pipe?
@@ -34,7 +35,7 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     private var streamingRequestID: String?
     private var streamingLineParser: StreamingLineParser?
     private var streamingOnEvent: (@MainActor (TranscriptionEvent) -> Void)?
-    private var teardownTask: Task<Void, Never>?
+    private let processGenerationGate = SidecarProcessGenerationGate()
     private let runtimeLocator: any SidecarRuntimeLocator
     private let sidecarWriteQueue = DispatchQueue(label: "com.magicvoice.sidecar.write")
 
@@ -48,6 +49,7 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
 
     deinit {
         transcriptionTask?.cancel()
+        engineStartTask?.cancel()
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
         if let sidecarProcess, sidecarProcess.isRunning {
             if let sidecarInput {
@@ -57,9 +59,6 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
                 )
             }
             sidecarProcess.terminate()
-            if sidecarProcess.isRunning {
-                kill(sidecarProcess.processIdentifier, SIGKILL)
-            }
         }
     }
 
@@ -157,13 +156,21 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     // MARK: – Engine lifecycle
 
     func startEngine(model: STTModel, language: String) {
-        Task { [weak self] in
+        if engineStartTask != nil {
+            stopEngine()
+        }
+        engineStartTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try await self.ensureSidecarProcess(model: model, language: language)
+                self.engineStartTask = nil
+            } catch is CancellationError {
+                // A stop/restart invalidates this generation without publishing
+                // a stale unavailable state.
             } catch {
                 self.lastErrorReason = "Engine failed to start: \(error.localizedDescription)"
                 self.engineState = .unavailable
+                self.engineStartTask = nil
             }
         }
     }
@@ -212,6 +219,8 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         cancelSession()
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        engineStartTask?.cancel()
+        engineStartTask = nil
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
 
         let process = sidecarProcess
@@ -221,16 +230,22 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         sidecarOutput = nil
         sidecarError = nil
         sidecarIsReady = false
+        processGenerationGate.invalidateCurrentGeneration()
         currentModelID = nil
         currentLanguage = nil
         engineState = .idle
 
         guard let process, let input else { return }
-        let precedingTeardown = teardownTask
-        teardownTask = Task {
-            await precedingTeardown?.value
+        processGenerationGate.scheduleTeardown {
             await Self.shutDown(process: process, input: input)
         }
+    }
+
+    /// Gives the native supervisor time to finish its bounded process-group
+    /// teardown before AppKit completes a cooperative application termination.
+    func shutDownForApplicationTermination() async {
+        stopEngine()
+        await processGenerationGate.waitForTeardown()
     }
 
     // MARK: – Private
@@ -321,13 +336,13 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
             return
         }
 
-        await teardownTask?.value
-        teardownTask = nil
+        await processGenerationGate.waitForTeardown()
+        try Task.checkCancellation()
 
         if let sidecarProcess, sidecarProcess.isRunning {
             stopEngine()
-            await teardownTask?.value
-            teardownTask = nil
+            await processGenerationGate.waitForTeardown()
+            try Task.checkCancellation()
         }
 
         guard let scriptURL = findSidecarScriptURL() else {
@@ -347,8 +362,13 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
             throw SidecarError.runtimeNeedsInstall(message)
         }
 
-        process.executableURL = launchPlan.executableURL
-        process.arguments = launchPlan.arguments
+        let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+            executableURL: launchPlan.executableURL,
+            arguments: launchPlan.arguments
+        )
+
+        process.executableURL = supervisedPlan.executableURL
+        process.arguments = supervisedPlan.arguments
         process.currentDirectoryURL = launchPlan.workingDirectoryURL
         process.environment = makeSidecarProcessEnvironment(
             base: ProcessInfo.processInfo.environment,
@@ -368,6 +388,8 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
 
         engineState = .starting
         sidecarIsReady = false
+        let generation = await processGenerationGate.beginLaunch()
+        try Task.checkCancellation()
         try process.run()
         sidecarProcess = process
         sidecarInput = input
@@ -384,6 +406,11 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         ).check()
         await readinessChannel.stop()
         try Task.checkCancellation()
+
+        guard processGenerationGate.isCurrent(generation), sidecarProcess === process else {
+            await Self.shutDown(process: process, input: input)
+            throw CancellationError()
+        }
 
         switch verdict {
         case .available:
@@ -428,8 +455,12 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     private static func runOneShotSidecarProcess(launchPlan: SidecarLaunchPlan) async throws {
         try await Task.detached(priority: .utility) {
             let process = Process()
-            process.executableURL = launchPlan.executableURL
-            process.arguments = launchPlan.arguments
+            let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+                executableURL: launchPlan.executableURL,
+                arguments: launchPlan.arguments
+            )
+            process.executableURL = supervisedPlan.executableURL
+            process.arguments = supervisedPlan.arguments
             process.currentDirectoryURL = launchPlan.workingDirectoryURL
             process.environment = makeSidecarProcessEnvironment(
                 base: ProcessInfo.processInfo.environment,
@@ -492,13 +523,13 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         var policy = SidecarLifecyclePolicy()
         apply(policy.handle(.shutdownRequested), process: process, input: input)
 
-        if await waitForExit(process) {
+        if await waitForExit(process, pollCount: 20) {
             apply(policy.handle(.childObservedExited), process: process, input: input)
             return
         }
 
         apply(policy.handle(.graceTimeoutElapsed), process: process, input: input)
-        if await waitForExit(process) {
+        if await waitForExit(process, pollCount: 80) {
             apply(policy.handle(.childObservedExited), process: process, input: input)
             return
         }
@@ -506,8 +537,7 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         apply(policy.handle(.graceTimeoutElapsed), process: process, input: input)
     }
 
-    private static func waitForExit(_ process: Process) async -> Bool {
-        let pollCount = 20
+    private static func waitForExit(_ process: Process, pollCount: Int) async -> Bool {
         for _ in 0..<pollCount {
             if !process.isRunning { return true }
             try? await Task.sleep(for: .milliseconds(50))

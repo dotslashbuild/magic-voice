@@ -65,6 +65,7 @@ final class SidecarSmokeHarness {
     private let readinessTimeout: Duration
     private let sessionTimeout: Duration
     private let shutdownGrace: Duration
+    private let supervisorTerminationGrace: Duration
 
     init(
         runtimeLocator: any SidecarRuntimeLocator,
@@ -78,7 +79,8 @@ final class SidecarSmokeHarness {
         requestID: String = "magic-voice-smoke-test",
         readinessTimeout: Duration = .seconds(5),
         sessionTimeout: Duration = .seconds(30),
-        shutdownGrace: Duration = .seconds(1)
+        shutdownGrace: Duration = .seconds(1),
+        supervisorTerminationGrace: Duration = .seconds(4)
     ) {
         self.runtimeLocator = runtimeLocator
         self.process = process
@@ -92,6 +94,7 @@ final class SidecarSmokeHarness {
         self.readinessTimeout = readinessTimeout
         self.sessionTimeout = sessionTimeout
         self.shutdownGrace = shutdownGrace
+        self.supervisorTerminationGrace = supervisorTerminationGrace
     }
 
     @discardableResult
@@ -233,7 +236,7 @@ final class SidecarSmokeHarness {
         }
 
         await perform(policy.handle(.graceTimeoutElapsed))
-        if await childExitedWithinGrace() {
+        if await childExitedWithinGrace(supervisorTerminationGrace) {
             await perform(policy.handle(.childObservedExited))
             return .clean
         }
@@ -246,9 +249,9 @@ final class SidecarSmokeHarness {
         return .requiredSIGKILL
     }
 
-    private func childExitedWithinGrace() async -> Bool {
+    private func childExitedWithinGrace(_ grace: Duration? = nil) async -> Bool {
         if !(await process.isChildRunning()) { return true }
-        try? await clock.sleep(for: shutdownGrace)
+        try? await clock.sleep(for: grace ?? shutdownGrace)
         return !(await process.isChildRunning())
     }
 
@@ -349,8 +352,12 @@ nonisolated final class FoundationSidecarSmokeProcess: SidecarSmokeProcess, @unc
         let errorPipe = Pipe()
         let channel = PipeJSONLinesMessageChannel(input: input, output: output)
 
-        process.executableURL = plan.executableURL
-        process.arguments = plan.arguments
+        let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+            executableURL: plan.executableURL,
+            arguments: plan.arguments
+        )
+        process.executableURL = supervisedPlan.executableURL
+        process.arguments = supervisedPlan.arguments
         process.currentDirectoryURL = plan.workingDirectoryURL
         process.environment = makeSidecarProcessEnvironment(
             base: ProcessInfo.processInfo.environment,

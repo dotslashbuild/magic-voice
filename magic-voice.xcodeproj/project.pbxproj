@@ -10,6 +10,8 @@
 		243B05F72F5D845700798C35 /* sidecar.py in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F52F5D845700798C35 /* sidecar.py */; };
 		243B05F82F5D845700798C35 /* pyproject.toml in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F62F5D845700798C35 /* pyproject.toml */; };
 		243B05FA2F5D845700798C36 /* uv.lock in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F92F5D845700798C36 /* uv.lock */; };
+		5A5000010000000000000001 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5A5000010000000000000002 /* main.c */; };
+		5A5000010000000000000003 /* MagicVoiceProcessSupervisor in Embed Process Supervisor */ = {isa = PBXBuildFile; fileRef = 5A5000010000000000000004 /* MagicVoiceProcessSupervisor */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -20,7 +22,28 @@
 			remoteGlobalIDString = 243B05F02F5D845700798C35;
 			remoteInfo = "magic-voice";
 		};
+		5A5000010000000000000005 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 243B05E92F5D845700798C35 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A5000010000000000000006;
+			remoteInfo = MagicVoiceProcessSupervisor;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5A5000010000000000000007 /* Embed Process Supervisor */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				5A5000010000000000000003 /* MagicVoiceProcessSupervisor in Embed Process Supervisor */,
+			);
+			name = "Embed Process Supervisor";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		243B05F12F5D845700798C35 /* Magic Voice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Magic Voice.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -28,6 +51,8 @@
 		243B05F62F5D845700798C35 /* pyproject.toml */ = {isa = PBXFileReference; lastKnownFileType = text; path = pyproject.toml; sourceTree = "<group>"; };
 		243B05F92F5D845700798C36 /* uv.lock */ = {isa = PBXFileReference; lastKnownFileType = text; path = uv.lock; sourceTree = "<group>"; };
 		AA1B05000000000000000001 /* magic-voiceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "magic-voiceTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A5000010000000000000002 /* main.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
+		5A5000010000000000000004 /* MagicVoiceProcessSupervisor */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = MagicVoiceProcessSupervisor; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +87,7 @@
 			children = (
 				243B05F32F5D845700798C35 /* magic-voice */,
 				AA1B05000000000000000002 /* magic-voiceTests */,
+				5A5000010000000000000008 /* process-supervisor */,
 				243B05F92F5D845700798C35 /* sidecar */,
 				243B05F22F5D845700798C35 /* Products */,
 			);
@@ -72,6 +98,7 @@
 			children = (
 				243B05F12F5D845700798C35 /* Magic Voice.app */,
 				AA1B05000000000000000001 /* magic-voiceTests.xctest */,
+				5A5000010000000000000004 /* MagicVoiceProcessSupervisor */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -86,6 +113,14 @@
 			path = sidecar;
 			sourceTree = "<group>";
 		};
+		5A5000010000000000000008 /* process-supervisor */ = {
+			isa = PBXGroup;
+			children = (
+				5A5000010000000000000002 /* main.c */,
+			);
+			path = "process-supervisor";
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -96,8 +131,12 @@
 				243B05ED2F5D845700798C35 /* Sources */,
 				243B05EE2F5D845700798C35 /* Frameworks */,
 				243B05EF2F5D845700798C35 /* Resources */,
+				5A5000010000000000000007 /* Embed Process Supervisor */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				5A5000010000000000000009 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				243B05F32F5D845700798C35 /* magic-voice */,
@@ -128,6 +167,22 @@
 			productReference = AA1B05000000000000000001 /* magic-voiceTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		5A5000010000000000000006 /* MagicVoiceProcessSupervisor */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A5000010000000000000010 /* Build configuration list for PBXNativeTarget "MagicVoiceProcessSupervisor" */;
+			buildPhases = (
+				5A5000010000000000000011 /* Sources */,
+				5A5000010000000000000012 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MagicVoiceProcessSupervisor;
+			productName = MagicVoiceProcessSupervisor;
+			productReference = 5A5000010000000000000004 /* MagicVoiceProcessSupervisor */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -144,6 +199,9 @@
 					AA1B05000000000000000010 = {
 						CreatedOnToolsVersion = 26.3;
 						TestTargetID = 243B05F02F5D845700798C35;
+					};
+					5A5000010000000000000006 = {
+						CreatedOnToolsVersion = 26.3;
 					};
 				};
 			};
@@ -163,6 +221,7 @@
 			targets = (
 				243B05F02F5D845700798C35 /* magic-voice */,
 				AA1B05000000000000000010 /* magic-voiceTests */,
+				5A5000010000000000000006 /* MagicVoiceProcessSupervisor */,
 			);
 		};
 /* End PBXProject section */
@@ -183,6 +242,16 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		5A5000010000000000000012 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		243B05ED2F5D845700798C35 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -194,6 +263,14 @@
 			files = (
 			);
 		};
+		5A5000010000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A5000010000000000000001 /* main.c in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -201,6 +278,11 @@
 			isa = PBXTargetDependency;
 			target = 243B05F02F5D845700798C35 /* magic-voice */;
 			targetProxy = AA1B05000000000000000032 /* PBXContainerItemProxy */;
+		};
+		5A5000010000000000000009 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A5000010000000000000006 /* MagicVoiceProcessSupervisor */;
+			targetProxy = 5A5000010000000000000005 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -458,6 +540,40 @@
 			};
 			name = Release;
 		};
+		5A5000010000000000000013 /* Debug configuration for PBXNativeTarget "MagicVoiceProcessSupervisor" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24PULD53RP;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		5A5000010000000000000014 /* Release configuration for PBXNativeTarget "MagicVoiceProcessSupervisor" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 24PULD53RP;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -483,6 +599,15 @@
 				AA1B05000000000000000021 /* Debug configuration for PBXNativeTarget "magic-voiceTests" */,
 				AA1B05000000000000000022 /* Release configuration for PBXNativeTarget "magic-voiceTests" */,
 			);
+			defaultConfigurationName = Release;
+		};
+		5A5000010000000000000010 /* Build configuration list for PBXNativeTarget "MagicVoiceProcessSupervisor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A5000010000000000000013 /* Debug configuration for PBXNativeTarget "MagicVoiceProcessSupervisor" */,
+				5A5000010000000000000014 /* Release configuration for PBXNativeTarget "MagicVoiceProcessSupervisor" */,
+			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */

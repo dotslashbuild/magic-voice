@@ -201,7 +201,8 @@ struct SidecarSmokeHarnessTests {
             requestID: "request",
             readinessTimeout: .seconds(5),
             sessionTimeout: .seconds(30),
-            shutdownGrace: .milliseconds(1)
+            shutdownGrace: .milliseconds(1),
+            supervisorTerminationGrace: .milliseconds(1)
         )
     }
 }

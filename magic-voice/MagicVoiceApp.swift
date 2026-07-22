@@ -20,12 +20,16 @@ struct MagicVoiceApp: App {
     @StateObject private var runtimeProvisioner: ManagedRuntimeProvisioner
     @StateObject private var loginItemController: LoginItemController
     private let smokeLaunchMode: SidecarSmokeLaunchMode?
+    private let isProcessSupervisorSmoke: Bool
 
     init() {
         let smokeLaunchMode = parseSidecarSmokeLaunchMode(
             arguments: ProcessInfo.processInfo.arguments
         )
         self.smokeLaunchMode = smokeLaunchMode
+        self.isProcessSupervisorSmoke = parseProcessSupervisorHostDeathSmokeRequest(
+            arguments: ProcessInfo.processInfo.arguments
+        ) != nil
         let settings = SettingsStore()
         let notchManager = NotchWindowManager()
         let permissionController = PermissionController()
@@ -56,7 +60,11 @@ struct MagicVoiceApp: App {
         _runtimeProvisioner = StateObject(wrappedValue: runtimeProvisioner)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
-        guard smokeLaunchMode == nil else { return }
+        appDelegate.installApplicationTerminationHandler { [weak transcriptionEngine] in
+            await transcriptionEngine?.shutDownForApplicationTermination()
+        }
+
+        guard smokeLaunchMode == nil, !isProcessSupervisorSmoke else { return }
 
         Task { @MainActor in
             if runtimeProvisioner.requiresProvisioning {
@@ -75,7 +83,7 @@ struct MagicVoiceApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(isInserted: .constant(smokeLaunchMode == nil)) {
+        MenuBarExtra(isInserted: .constant(smokeLaunchMode == nil && !isProcessSupervisorSmoke)) {
             MenuBarView()
                 .environmentObject(settings)
                 .environmentObject(notchManager)
