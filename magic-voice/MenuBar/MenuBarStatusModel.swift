@@ -62,8 +62,12 @@ enum MenuBarStatusModel {
             statusWord = "Setting Up"
         } else if banner != nil {
             statusWord = "Error"
+        } else if !monitoringEnabled {
+            statusWord = "Paused"
+        } else if engineState == .starting {
+            statusWord = "Starting"
         } else {
-            statusWord = monitoringEnabled ? "Ready" : "Paused"
+            statusWord = "Ready"
         }
 
         return MenuBarStatus(

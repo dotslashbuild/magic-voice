@@ -24,6 +24,36 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
+    func startingEngineWhileMonitoringShowsStarting() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            engineState: .starting,
+            engineErrorReason: nil,
+            notchActive: false,
+            monitoringEnabled: true
+        )
+
+        #expect(status.statusWord == "Starting")
+        #expect(status.glyph == .idle)
+        #expect(status.banner == nil)
+    }
+
+    @Test
+    func startingEngineWhileMonitoringIsDisabledShowsPaused() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            engineState: .starting,
+            engineErrorReason: nil,
+            notchActive: false,
+            monitoringEnabled: false
+        )
+
+        #expect(status.statusWord == "Paused")
+        #expect(status.glyph == .paused)
+        #expect(status.banner == nil)
+    }
+
+    @Test
     func monitoringOffIsPaused() {
         let status = MenuBarStatusModel.derive(
             missingPermissions: [],
