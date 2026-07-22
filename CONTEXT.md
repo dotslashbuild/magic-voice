@@ -2,6 +2,8 @@
 
 **Magic Voice** — the product name for this macOS menu-bar voice dictation app. The canonical machine name is `magic-voice`, used for the source folder, Xcode target, Xcode scheme, and bundle identifier (`ai.arailabs.magic-voice`).
 
+**Install Experience** — the no-terminal path by which a normal Mac user gets Magic Voice onto their Mac, launches it from Applications, and reaches a working first run. _Avoid_: onboarding, when referring specifically to distribution and installation.
+
 **Activation key** — the modifier key that drives dictation gestures. It defaults to `fn` and can be changed in Settings to right Command or right Option; timing stays fixed inside `HotkeyGestureMachine`.
 
 **TranscriptionEngine** — the backend-neutral seam the recording pipeline depends on for speech-to-text: callers `startSession` (model + language), `feedAudio` 16 kHz mono float32 chunks, then `finishSession`/`cancelSession`, receiving a single `TranscriptionEvent` stream (`.ready` / `.partial` / `.final` / `.failed`) through one handler. Every engine is stream-in/stream-out; non-streaming backends adapt inside their adapter so callers never branch on capability. `SidecarTranscriptionEngine` is the production adapter (wraps the Sidecar); `FakeTranscriptionEngine` is a scripted test double.

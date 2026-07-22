@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 @main
 struct MagicVoiceApp: App {
@@ -18,6 +19,7 @@ struct MagicVoiceApp: App {
     @StateObject private var textInjector: TextInjector
     @StateObject private var transcriptionEngine: SidecarTranscriptionEngine
     @StateObject private var loginItemController: LoginItemController
+    @StateObject private var firstRunSetupController: FirstRunSetupController
 
     init() {
         let settings = SettingsStore()
@@ -27,6 +29,11 @@ struct MagicVoiceApp: App {
         audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
         let textInjector = TextInjector(permissionController: permissionController)
         let transcriptionEngine = SidecarTranscriptionEngine()
+        let firstRunSetupController = FirstRunSetupController(
+            settings: settings,
+            permissionController: permissionController,
+            engine: transcriptionEngine
+        )
         let dictationSession = DictationSession(
             settings: settings,
             notchManager: notchManager,
@@ -35,6 +42,7 @@ struct MagicVoiceApp: App {
             textInjector: textInjector,
             transcriptionEngine: transcriptionEngine
         )
+        firstRunSetupController.attach(dictationSession: dictationSession)
 
         _settings = StateObject(wrappedValue: settings)
         _loginItemController = StateObject(wrappedValue: LoginItemController(
@@ -46,13 +54,11 @@ struct MagicVoiceApp: App {
         _audioCaptureManager = StateObject(wrappedValue: audioCaptureManager)
         _textInjector = StateObject(wrappedValue: textInjector)
         _transcriptionEngine = StateObject(wrappedValue: transcriptionEngine)
+        _firstRunSetupController = StateObject(wrappedValue: firstRunSetupController)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
         Task { @MainActor in
-            transcriptionEngine.startEngine(
-                model: settings.selectedModel,
-                language: settings.language
-            )
+            firstRunSetupController.evaluate()
             dictationSession.startHotkeyMonitoringOnLaunch()
         }
     }
@@ -67,10 +73,12 @@ struct MagicVoiceApp: App {
                 .environmentObject(dictationSession)
                 .environmentObject(textInjector)
                 .environmentObject(transcriptionEngine)
+                .environmentObject(firstRunSetupController)
         } label: {
             Image(nsImage: MenuBarGlyph.image(for: MenuBarStatusModel.glyph(
                 notchActive: notchManager.state != .collapsed,
-                monitoringEnabled: dictationSession.hotkeyMonitoringEnabled
+                monitoringEnabled: dictationSession.hotkeyMonitoringEnabled,
+                setupPaused: transcriptionEngine.engineState == .loadingModel
             )))
             .accessibilityLabel("Magic Voice")
         }
@@ -85,6 +93,147 @@ struct MagicVoiceApp: App {
             }
             .environmentObject(settings)
             .environmentObject(transcriptionEngine)
+            .environmentObject(firstRunSetupController)
+        }
+    }
+}
+
+@MainActor
+final class FirstRunSetupController: ObservableObject {
+    @Published private(set) var isSettingUp = false
+
+    private let settings: SettingsStore
+    private let permissionController: PermissionController
+    private let engine: SidecarTranscriptionEngine
+    private weak var dictationSession: DictationSession?
+    private var setupModelInFlight: STTModel?
+    private var cancellables: Set<AnyCancellable> = []
+
+    init(
+        settings: SettingsStore,
+        permissionController: PermissionController,
+        engine: SidecarTranscriptionEngine
+    ) {
+        self.settings = settings
+        self.permissionController = permissionController
+        self.engine = engine
+
+        permissionController.$statuses
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        settings.$selectedModelRaw
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        settings.$language
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        engine.$engineState
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+
+        engine.$completedModelDownload
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
+    }
+
+    func attach(dictationSession: DictationSession) {
+        self.dictationSession = dictationSession
+    }
+
+    func evaluate() {
+        markCompletedSetupIfNeeded()
+
+        let model = settings.selectedModel
+
+        guard permissionController.allRequiredPermissionsGranted else {
+            isSettingUp = setupModelInFlight != nil && engine.engineState == .loadingModel
+            updateHotkeySuspension()
+            return
+        }
+
+        if settings.isSetupComplete(for: model) {
+            if let setupModelInFlight, setupModelInFlight != model {
+                isSettingUp = engine.engineState == .loadingModel
+                updateHotkeySuspension()
+                return
+            }
+            if engine.engineState == .loadingModel {
+                isSettingUp = true
+                updateHotkeySuspension()
+                return
+            }
+
+            setupModelInFlight = nil
+            isSettingUp = false
+            updateHotkeySuspension()
+            if engine.engineState == .idle {
+                engine.startEngine(model: model, language: settings.language)
+            }
+            return
+        }
+
+        if engine.engineState == .loadingModel {
+            isSettingUp = true
+            updateHotkeySuspension()
+            return
+        }
+
+        guard engine.engineState != .unavailable else {
+            isSettingUp = false
+            updateHotkeySuspension()
+            return
+        }
+
+        setupModelInFlight = model
+        isSettingUp = true
+        updateHotkeySuspension()
+        engine.downloadModel(model: model, language: settings.language)
+    }
+
+    func downloadSelectedModel() {
+        guard engine.engineState != .loadingModel else {
+            isSettingUp = setupModelInFlight != nil
+            updateHotkeySuspension()
+            return
+        }
+
+        setupModelInFlight = settings.selectedModel
+        isSettingUp = true
+        updateHotkeySuspension()
+        engine.downloadModel(model: settings.selectedModel, language: settings.language)
+    }
+
+    func retry() {
+        guard permissionController.allRequiredPermissionsGranted else { return }
+        setupModelInFlight = nil
+        isSettingUp = false
+        engine.stopEngine()
+        evaluate()
+    }
+
+    private func markCompletedSetupIfNeeded() {
+        guard let completedModel = setupModelInFlight,
+              engine.completedModelDownload?.model == completedModel else {
+            return
+        }
+
+        settings.markSetupComplete(for: completedModel)
+        setupModelInFlight = nil
+        isSettingUp = false
+    }
+
+    private func updateHotkeySuspension() {
+        if engine.engineState == .loadingModel {
+            dictationSession?.suspendHotkeysForSetup()
+        } else if settings.isSetupComplete(for: settings.selectedModel) {
+            dictationSession?.resumeHotkeysAfterSetupIfNeeded()
         }
     }
 }

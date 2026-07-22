@@ -29,6 +29,8 @@ final class DictationSession: ObservableObject {
     private var recordingSessionShouldInjectTranscript = true
     private var engineReadyForAudio = false
     private var finishWhenEngineReady = false
+    private var setupSuspensionActive = false
+    private var setupSuspensionShouldResume = false
     private var prerollBuffer = PrerollAudioBuffer()
     private var cancellables: Set<AnyCancellable> = []
 
@@ -108,15 +110,7 @@ final class DictationSession: ObservableObject {
 
     func pauseHotkeyMonitoring() {
         activationKeyMonitor.pause()
-        // Tear down any in-flight recording and the gesture timing driver that
-        // the monitor doesn't own.
-        pendingDecisionTask?.cancel()
-        pendingDecisionDeadline = nil
-        _ = gestureMachine.reset()
-        discardPreroll()
-        if triggerMode != .idle {
-            stopRecording(reason: "Stopped monitoring", shouldInjectTranscript: false)
-        }
+        tearDownActiveGestureAndRecording(reason: "Stopped monitoring")
     }
 
     func toggleHotkeyMonitoring() {
@@ -125,6 +119,23 @@ final class DictationSession: ObservableObject {
         } else {
             startHotkeyMonitoring()
         }
+    }
+
+    func suspendHotkeysForSetup() {
+        guard !setupSuspensionActive else { return }
+        setupSuspensionActive = true
+        setupSuspensionShouldResume = hotkeyMonitoringEnabled
+        activationKeyMonitor.suspend(reason: "Setting up speech model")
+        tearDownActiveGestureAndRecording(reason: "Setting up speech model")
+    }
+
+    func resumeHotkeysAfterSetupIfNeeded() {
+        guard setupSuspensionActive else { return }
+        let shouldResume = setupSuspensionShouldResume
+        setupSuspensionActive = false
+        setupSuspensionShouldResume = false
+        guard shouldResume else { return }
+        activationKeyMonitor.enableIfPermitted(refreshPermissions: true)
     }
 
     private func handleFunctionKeyDown() {
@@ -149,6 +160,16 @@ final class DictationSession: ObservableObject {
         _ = gestureMachine.reset()
         discardPreroll()
         activationKeyMonitor.activationKeyDidChange()
+    }
+
+    private func tearDownActiveGestureAndRecording(reason: String) {
+        pendingDecisionTask?.cancel()
+        pendingDecisionDeadline = nil
+        _ = gestureMachine.reset()
+        discardPreroll()
+        if triggerMode != .idle {
+            stopRecording(reason: reason, shouldInjectTranscript: false)
+        }
     }
 
     private func handleGestureDeadline(at deadline: TimeInterval) {
@@ -230,6 +251,12 @@ final class DictationSession: ObservableObject {
     }
 
     private func startRecording(mode: TriggerMode, reason: String) {
+        guard settings.isSetupComplete(for: settings.selectedModel) else {
+            lastHotkeyEventDescription = "Setting up speech model"
+            discardPreroll()
+            return
+        }
+
         guard audioCaptureManager.lastError == nil else {
             discardPreroll()
             return
@@ -272,6 +299,12 @@ final class DictationSession: ObservableObject {
     }
 
     private func stopRecording(reason: String, shouldInjectTranscript: Bool = true) {
+        guard triggerMode != .idle else {
+            guard !finishWhenEngineReady else { return }
+            discardPreroll()
+            return
+        }
+
         triggerMode = .idle
         lastHotkeyEventDescription = reason
         recordingSessionShouldInjectTranscript = shouldInjectTranscript
