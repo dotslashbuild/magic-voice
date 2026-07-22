@@ -300,6 +300,7 @@ final class DictationSession: ObservableObject {
 
     private func stopRecording(reason: String, shouldInjectTranscript: Bool = true) {
         guard triggerMode != .idle else {
+            guard !finishWhenEngineReady else { return }
             discardPreroll()
             return
         }
