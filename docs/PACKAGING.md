@@ -8,6 +8,22 @@ fallback, and the Python sidecar process do not fit the current sandbox design.
 > Apple notarization, stapling, Gatekeeper verification, clean-account runtime
 > smoke testing, and the dependency/model license review all pass.
 
+The first public easy-install release should ship as a signed, notarized `.dmg` with the standard drag-to-Applications flow. Do not use a `.pkg` installer unless a future release needs privileged installation or preinstall steps.
+
+The first release should use manual updates: users download a replacement `.dmg` from the website or GitHub Releases. Defer Sparkle or any other automatic updater until signing, notarization, and first-run setup are stable.
+
+## Xcode Settings
+
+- Product name/display name: `Magic Voice`
+- Current project deployment target: macOS 26.2
+- Intended public deployment target: verify before release and keep this file, README, and Xcode settings in sync
+- First public easy-install release hardware target: Apple Silicon Macs only.
+- App Sandbox: Off. The Release entitlement file intentionally does not enable the sandbox.
+- Hardened Runtime: enabled for the Release configuration.
+- `LSUIElement`: `YES`
+- `NSMicrophoneUsageDescription`: `Magic Voice uses your microphone to transcribe speech locally on your device.`
+- `NSAppleEventsUsageDescription`: `Magic Voice uses Accessibility to insert transcribed text into the active text field.`
+
 ## Release architecture
 
 The app bundles four runtime resources at the top of `Contents/Resources` and a
@@ -102,6 +118,8 @@ timestamp:
 3. `Magic Voice.app` last, with `magic-voice.entitlements`.
 4. The finished DMG container.
 
+For the first public easy-install build, bundle a signed `uv` executable and let the app create a managed Python/venv under Application Support. This keeps the user-facing install path no-terminal while staying close to the current sidecar architecture. Fully bundling Python or replacing the sidecar with a native Swift/Core ML runtime can be revisited after the first public install path works.
+
 The verifier runs `codesign --verify --deep --strict`, checks each Mach-O has a
 Developer ID signature from the app's Team ID, Hardened Runtime, and a secure
 timestamp, and fails if the app contains `com.apple.security.get-task-allow`.
@@ -129,8 +147,29 @@ rest of Hardened Runtime, and the release pipeline still signs all native code
 that is present inside the shipped app. Removing the entitlement requires a new
 runtime design that embeds and signs every native dependency before distribution.
 
-## One-time signing setup
+## Licensing and redistribution
 
+The repository license covers this project's source code. It does not automatically grant redistribution rights for downloaded models, Python packages, or bundled runtime tools.
+
+## Privacy and System Side Effects
+
+Release notes and onboarding should disclose:
+
+- Audio and transcription run locally after model/dependency download.
+- First run downloads Python dependencies and the selected STT model into Application Support rather than bundling the model inside the `.dmg`.
+- During first-run setup, dictation should stay blocked behind one clear setup state until Python dependencies and the speech model are ready. Show percentage progress only if it is reliable; otherwise show an indeterminate setup state with failure and retry.
+- The menu-bar status model should show setup explicitly as `Setting Up`, not `Ready`; managed-runtime setup or failure is the highest-priority banner, permissions are next, model setup follows, and ready appears only after the engine/model path is usable.
+- First-run setup should start automatically after the required Microphone and Accessibility permissions are granted, with a visible failure and retry path instead of a separate setup button.
+- Track setup completion per selected speech model using the model's stable identifier. Set the marker only after Python dependencies and the selected model download complete successfully; failed setup should leave the marker unset and show retry.
+- If the user switches to a model without a completed setup marker, Magic Voice should re-enter the same setup flow for that model. Switching back to a model with a completed setup marker should not repeat setup.
+- The first-run path should use the default speech model without asking the user to choose. Keep alternate models in Settings for later, not in the install flow.
+- First-run guidance should live inside the existing menu-bar popover as a compact checklist/status flow, not in a separate welcome window.
+- The fallback injector temporarily replaces the clipboard and restores it after paste.
+- The fn activation-key path temporarily changes the user-wide `com.apple.HIToolbox AppleFnUsageType` preference to avoid Apple Dictation conflicts, then restores the saved value on normal release and next-launch recovery.
+
+## Signing and Notarization
+
+Use a Developer ID Application certificate for distribution outside the App Store.
 Install a valid **Developer ID Application** certificate in the signing
 keychain. Confirm the exact identity without exporting private key material:
 

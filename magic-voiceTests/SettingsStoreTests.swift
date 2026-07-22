@@ -52,4 +52,25 @@ struct SettingsStoreTests {
         let reloaded = SettingsStore(defaults: suite)
         #expect(reloaded.history.contains { $0.text == "hello" })
     }
+
+    @Test
+    func setupCompletionIsTrackedPerModel() {
+        let suiteName = "test-\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: suiteName)!
+        defer { suite.removePersistentDomain(forName: suiteName) }
+
+        let store = SettingsStore(defaults: suite)
+        #expect(!store.isSetupComplete(for: .nemotronStreaming06B))
+        #expect(!store.isSetupComplete(for: .nemotronStreaming06B8Bit))
+
+        store.markSetupComplete(for: .nemotronStreaming06B)
+
+        #expect(store.isSetupComplete(for: .nemotronStreaming06B))
+        #expect(!store.isSetupComplete(for: .nemotronStreaming06B8Bit))
+        #expect(suite.stringArray(forKey: "setupCompletedModels") == [STTModel.nemotronStreaming06B.rawValue])
+
+        let reloaded = SettingsStore(defaults: suite)
+        #expect(reloaded.isSetupComplete(for: .nemotronStreaming06B))
+        #expect(!reloaded.isSetupComplete(for: .nemotronStreaming06B8Bit))
+    }
 }

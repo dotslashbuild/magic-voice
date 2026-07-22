@@ -24,9 +24,12 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     @Published private(set) var lastStderrLine: String?
     @Published private(set) var currentModelID: String?
     @Published private(set) var currentLanguage: String?
+    @Published private(set) var completedModelDownload: ModelDownloadCompletion?
 
     private var transcriptionTask: Task<Void, Never>?
     private var engineStartTask: Task<Void, Never>?
+    private var modelDownloadTask: Task<Void, Never>?
+    private var activeModelDownloadID: UUID?
     private var sidecarProcess: Process?
     private var sidecarInput: Pipe?
     private var sidecarOutput: Pipe?
@@ -50,6 +53,7 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     deinit {
         transcriptionTask?.cancel()
         engineStartTask?.cancel()
+        modelDownloadTask?.cancel()
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
         if let sidecarProcess, sidecarProcess.isRunning {
             if let sidecarInput {
@@ -181,10 +185,16 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     }
 
     func downloadModel(model: STTModel, language: String) {
+        modelDownloadTask?.cancel()
+        let downloadID = UUID()
+        activeModelDownloadID = downloadID
+        completedModelDownload = nil
         lastErrorReason = nil
         engineState = .loadingModel
 
         guard let scriptURL = findSidecarScriptURL() else {
+            activeModelDownloadID = nil
+            modelDownloadTask = nil
             lastErrorReason = SidecarError.scriptMissing.localizedDescription
             engineState = .unavailable
             return
@@ -195,21 +205,38 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         case .ready(let plan):
             launchPlan = plan
         case .needsInstall(let message):
+            activeModelDownloadID = nil
+            modelDownloadTask = nil
             lastErrorReason = message
             engineState = .unavailable
             return
         }
 
-        Task { [weak self] in
+        modelDownloadTask = Task { [weak self] in
             do {
                 try await Self.runOneShotSidecarProcess(launchPlan: launchPlan)
                 await MainActor.run {
-                    self?.engineState = .idle
+                    guard let self,
+                          self.activeModelDownloadID == downloadID,
+                          !Task.isCancelled else {
+                        return
+                    }
+                    self.completedModelDownload = ModelDownloadCompletion(id: downloadID, model: model)
+                    self.activeModelDownloadID = nil
+                    self.modelDownloadTask = nil
+                    self.engineState = .idle
                 }
             } catch {
                 await MainActor.run {
-                    self?.lastErrorReason = "Model download failed: \(error.localizedDescription)"
-                    self?.engineState = .unavailable
+                    guard let self,
+                          self.activeModelDownloadID == downloadID,
+                          !Task.isCancelled else {
+                        return
+                    }
+                    self.activeModelDownloadID = nil
+                    self.modelDownloadTask = nil
+                    self.lastErrorReason = "Model download failed: \(error.localizedDescription)"
+                    self.engineState = .unavailable
                 }
             }
         }
@@ -221,6 +248,9 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         transcriptionTask = nil
         engineStartTask?.cancel()
         engineStartTask = nil
+        modelDownloadTask?.cancel()
+        modelDownloadTask = nil
+        activeModelDownloadID = nil
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
 
         let process = sidecarProcess
@@ -467,16 +497,27 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
                 overrides: launchPlan.environment
             )
 
-            let output = Pipe()
-            let error = Pipe()
-            process.standardOutput = output
-            process.standardError = error
+            let logURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("magic-voice-sidecar-\(UUID().uuidString).log")
+            guard FileManager.default.createFile(atPath: logURL.path, contents: nil) else {
+                throw SidecarError.message("Failed to create temporary log file at \(logURL.path)")
+            }
+            let logFile = try FileHandle(forUpdating: logURL)
+            defer {
+                try? logFile.close()
+                try? FileManager.default.removeItem(at: logURL)
+            }
+
+            process.standardOutput = logFile
+            process.standardError = logFile
 
             try process.run()
             process.waitUntilExit()
 
             guard process.terminationStatus == 0 else {
-                let data = error.fileHandleForReading.readDataToEndOfFile()
+                try? logFile.synchronize()
+                try? logFile.seek(toOffset: 0)
+                let data = (try? logFile.readToEnd()) ?? Data()
                 let message = String(data: data, encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 throw SidecarError.message(message?.isEmpty == false ? message! : "sidecar exited with status \(process.terminationStatus)")
@@ -568,6 +609,11 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         }
     }
 
+}
+
+struct ModelDownloadCompletion: Equatable {
+    let id: UUID
+    let model: STTModel
 }
 
 private struct SidecarEvent: Decodable {

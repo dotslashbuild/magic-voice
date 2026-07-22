@@ -63,6 +63,7 @@ struct TranscriptionEntry: Identifiable, Codable, Equatable {
 //   "selectedMicrophoneID" – String, AVCaptureDevice uniqueID or "auto"
 //   "historyCount"         – Int, maximum number of history entries retained
 //   "transcriptionHistory" – Data, JSON-encoded [TranscriptionEntry]
+//   "setupCompletedModels" – [String], STTModel raw values with completed first-run setup
 
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -90,6 +91,9 @@ final class SettingsStore: ObservableObject {
     }
     @Published var historyCount: Int {
         didSet { defaults.set(historyCount, forKey: Keys.historyCount) }
+    }
+    @Published private(set) var setupCompletedModelRawValues: Set<String> {
+        didSet { defaults.set(Array(setupCompletedModelRawValues).sorted(), forKey: Keys.setupCompletedModels) }
     }
 
     @Published private(set) var history: [TranscriptionEntry] = []
@@ -120,8 +124,19 @@ final class SettingsStore: ObservableObject {
         self.activationKeyRaw      = defaults.string(forKey: Keys.activationKey) ?? ActivationKey.function.rawValue
         self.selectedMicrophoneID  = defaults.string(forKey: Keys.selectedMicrophoneID) ?? AudioInputDevice.autoID
         self.historyCount          = defaults.object(forKey: Keys.historyCount)          != nil ? defaults.integer(forKey: Keys.historyCount) : 10
+        self.setupCompletedModelRawValues = Set(defaults.stringArray(forKey: Keys.setupCompletedModels) ?? [])
 
         loadHistory()
+    }
+
+    // MARK: – First-run setup
+
+    func isSetupComplete(for model: STTModel) -> Bool {
+        setupCompletedModelRawValues.contains(model.rawValue)
+    }
+
+    func markSetupComplete(for model: STTModel) {
+        setupCompletedModelRawValues.insert(model.rawValue)
     }
 
     // MARK: – History
@@ -164,5 +179,6 @@ final class SettingsStore: ObservableObject {
         static let selectedMicrophoneID  = "selectedMicrophoneID"
         static let historyCount          = "historyCount"
         static let transcriptionHistory  = "transcriptionHistory"
+        static let setupCompletedModels  = "setupCompletedModels"
     }
 }
