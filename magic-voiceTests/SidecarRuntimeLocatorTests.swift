@@ -9,6 +9,7 @@ import Foundation
 import Testing
 @testable import Magic_Voice
 
+@MainActor
 struct SidecarRuntimeLocatorTests {
 
     @Test
@@ -104,45 +105,53 @@ struct SidecarRuntimeLocatorTests {
     }
 
     @Test
-    func managedUvCopiesLockedProjectIntoApplicationSupport() throws {
-        let fileManager = FileManager.default
-        let tempURL = fileManager.temporaryDirectory
-            .appendingPathComponent("ManagedUvRuntimeLocatorTests-\(UUID().uuidString)", isDirectory: true)
-        let sourceURL = tempURL.appendingPathComponent("source", isDirectory: true)
-        let supportURL = tempURL.appendingPathComponent("support", isDirectory: true)
-        let uvURL = tempURL.appendingPathComponent("uv")
-        try fileManager.createDirectory(at: sourceURL, withIntermediateDirectories: true)
-        try "#!/bin/sh\n".write(to: uvURL, atomically: true, encoding: .utf8)
-        try "print('ok')\n".write(to: sourceURL.appendingPathComponent("sidecar.py"), atomically: true, encoding: .utf8)
-        try "[project]\nname = \"sidecar\"\n".write(to: sourceURL.appendingPathComponent("pyproject.toml"), atomically: true, encoding: .utf8)
-        try "version = 1\n".write(to: sourceURL.appendingPathComponent("uv.lock"), atomically: true, encoding: .utf8)
-        defer { try? fileManager.removeItem(at: tempURL) }
+    func bundledRuntimeSignalsThatProvisioningIsNeeded() {
+        let harness = RuntimeTestHarness()
+        let locator = BundledRuntimeLocator(
+            bundle: harness.bundle,
+            applicationSupportDirectoryURL: harness.supportURL,
+            fileSystem: harness.fileSystem
+        )
 
-        let locator = ManagedUvRuntimeLocator(
-            bundledUvURL: uvURL,
-            applicationSupportDirectoryURL: supportURL,
-            isExecutable: { $0 == uvURL.path }
+        #expect(locator.locate(
+            scriptURL: URL(fileURLWithPath: "/ignored/sidecar.py"),
+            model: .nemotronStreaming06B,
+            language: "auto",
+            mode: .serve
+        ) == .needsInstall(message: "Magic Voice is preparing its managed transcription runtime."))
+    }
+
+    @Test
+    func bundledRuntimeResolvesManagedLaunchPlan() {
+        let harness = RuntimeTestHarness()
+        harness.seedValidManagedRuntime()
+        let locator = BundledRuntimeLocator(
+            bundle: harness.bundle,
+            applicationSupportDirectoryURL: harness.supportURL,
+            fileSystem: harness.fileSystem
         )
 
         guard case .ready(let plan) = locator.locate(
-            scriptURL: sourceURL.appendingPathComponent("sidecar.py"),
-            model: .nemotronStreaming06B,
-            language: "auto",
+            scriptURL: URL(fileURLWithPath: "/ignored/sidecar.py"),
+            model: .nemotronStreaming06B8Bit,
+            language: "fr",
             mode: .downloadModel
         ) else {
-            Issue.record("Expected managed uv launch plan")
+            Issue.record("Expected bundled runtime launch plan")
             return
         }
 
-        let managedProjectURL = supportURL.appendingPathComponent("Sidecar", isDirectory: true)
-        #expect(fileManager.fileExists(atPath: managedProjectURL.appendingPathComponent("sidecar.py").path))
-        #expect(fileManager.fileExists(atPath: managedProjectURL.appendingPathComponent("pyproject.toml").path))
-        #expect(fileManager.fileExists(atPath: managedProjectURL.appendingPathComponent("uv.lock").path))
-        #expect(plan.executableURL == uvURL)
-        #expect(plan.arguments.contains("--frozen"))
-        #expect(plan.arguments.contains("--managed-python"))
-        #expect(plan.arguments.contains("--download-model"))
-        #expect(plan.environment["UV_PROJECT_ENVIRONMENT"] == supportURL.appendingPathComponent("Sidecar/.venv").path)
-        #expect(plan.environment["HF_HOME"] == supportURL.appendingPathComponent("ModelCache/huggingface").path)
+        #expect(plan.executableURL.path == "/support/Sidecar/uv")
+        #expect(plan.workingDirectoryURL.path == "/support/Sidecar")
+        #expect(plan.arguments == [
+            "--project", "/support/Sidecar",
+            "run", "--frozen", "--managed-python", "--python", "3.12", "python",
+            "/support/Sidecar/sidecar.py",
+            "--model", STTModel.nemotronStreaming06B8Bit.hubID,
+            "--language", "fr",
+            "--download-model"
+        ])
+        #expect(plan.environment["UV_PROJECT_ENVIRONMENT"] == "/support/Sidecar/.venv")
+        #expect(plan.environment["HF_HOME"] == "/support/ModelCache/huggingface")
     }
 }

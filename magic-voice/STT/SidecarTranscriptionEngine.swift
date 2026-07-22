@@ -10,6 +10,7 @@
 //
 
 import Combine
+import Darwin
 import Foundation
 
 @MainActor
@@ -26,15 +27,18 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     @Published private(set) var completedModelDownload: ModelDownloadCompletion?
 
     private var transcriptionTask: Task<Void, Never>?
+    private var engineStartTask: Task<Void, Never>?
     private var modelDownloadTask: Task<Void, Never>?
     private var activeModelDownloadID: UUID?
     private var sidecarProcess: Process?
     private var sidecarInput: Pipe?
     private var sidecarOutput: Pipe?
     private var sidecarError: Pipe?
+    private var sidecarIsReady = false
     private var streamingRequestID: String?
     private var streamingLineParser: StreamingLineParser?
     private var streamingOnEvent: (@MainActor (TranscriptionEvent) -> Void)?
+    private let processGenerationGate = SidecarProcessGenerationGate()
     private let runtimeLocator: any SidecarRuntimeLocator
     private let sidecarWriteQueue = DispatchQueue(label: "com.magicvoice.sidecar.write")
 
@@ -48,9 +52,18 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
 
     deinit {
         transcriptionTask?.cancel()
+        engineStartTask?.cancel()
         modelDownloadTask?.cancel()
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
-        sidecarProcess?.terminate()
+        if let sidecarProcess, sidecarProcess.isRunning {
+            if let sidecarInput {
+                try? Self.writeJSONLine(
+                    ["type": "shutdown"],
+                    to: sidecarInput
+                )
+            }
+            sidecarProcess.terminate()
+        }
     }
 
     // MARK: – Streaming session
@@ -63,23 +76,36 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         cancelSession()
         lastTranscript = ""
         lastErrorReason = nil
-        engineState = .transcribing
+        engineState = .starting
         streamingOnEvent = onEvent
+        let requestID = UUID().uuidString
+        streamingRequestID = requestID
 
-        do {
-            try ensureSidecarProcess(model: model, language: language)
-            guard let sidecarInput else { throw SidecarError.notConnected }
+        transcriptionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.ensureSidecarProcess(model: model, language: language)
+                try Task.checkCancellation()
+                guard self.streamingRequestID == requestID,
+                      let sidecarInput = self.sidecarInput else {
+                    return
+                }
 
-            let requestID = UUID().uuidString
-            streamingRequestID = requestID
-            try writeJSONLine(["type": "start_stream", "request_id": requestID], to: sidecarInput)
-            startStreamingReader(requestID: requestID)
-        } catch {
-            let reason = "Streaming engine unavailable: \(error.localizedDescription)"
-            lastErrorReason = reason
-            engineState = .unavailable
-            onEvent(.failed(reason: reason))
-            streamingOnEvent = nil
+                try Self.writeJSONLine(
+                    ["type": "start_stream", "request_id": requestID],
+                    to: sidecarInput
+                )
+                self.startStreamingReader(requestID: requestID)
+            } catch is CancellationError {
+                // Cancellation deliberately emits no terminal or later event.
+            } catch {
+                guard self.streamingRequestID == requestID else { return }
+                let reason = "Streaming engine unavailable: \(error.localizedDescription)"
+                self.lastErrorReason = reason
+                self.engineState = .unavailable
+                onEvent(.failed(reason: reason))
+                self.clearStreamingState()
+            }
         }
     }
 
@@ -112,23 +138,43 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     func cancelSession() {
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        let requestID = streamingRequestID
+        let input = sidecarInput
         sidecarOutput?.fileHandleForReading.readabilityHandler = nil
         streamingLineParser = nil
         streamingRequestID = nil
         streamingOnEvent = nil
-        engineState = sidecarProcess?.isRunning == true ? .ready : .idle
+        if let requestID, let input {
+            writeJSONLineAsync(
+                SidecarJSONLinesMessage.cancelStream(requestID: requestID).fields,
+                to: input
+            )
+        }
+        if sidecarProcess?.isRunning == true {
+            engineState = sidecarIsReady ? .ready : .starting
+        } else {
+            engineState = .idle
+        }
     }
 
     // MARK: – Engine lifecycle
 
     func startEngine(model: STTModel, language: String) {
-        Task { [weak self] in
+        if engineStartTask != nil {
+            stopEngine()
+        }
+        engineStartTask = Task { [weak self] in
             guard let self else { return }
             do {
-                try self.ensureSidecarProcess(model: model, language: language)
+                try await self.ensureSidecarProcess(model: model, language: language)
+                self.engineStartTask = nil
+            } catch is CancellationError {
+                // A stop/restart invalidates this generation without publishing
+                // a stale unavailable state.
             } catch {
                 self.lastErrorReason = "Engine failed to start: \(error.localizedDescription)"
                 self.engineState = .unavailable
+                self.engineStartTask = nil
             }
         }
     }
@@ -197,18 +243,39 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     }
 
     func stopEngine() {
+        cancelSession()
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        engineStartTask?.cancel()
+        engineStartTask = nil
         modelDownloadTask?.cancel()
         modelDownloadTask = nil
         activeModelDownloadID = nil
-        sidecarInput?.fileHandleForWriting.write(Data("{\"type\":\"shutdown\"}\n".utf8))
-        sidecarProcess?.terminate()
+        sidecarOutput?.fileHandleForReading.readabilityHandler = nil
+
+        let process = sidecarProcess
+        let input = sidecarInput
         sidecarProcess = nil
         sidecarInput = nil
         sidecarOutput = nil
         sidecarError = nil
+        sidecarIsReady = false
+        processGenerationGate.invalidateCurrentGeneration()
         currentModelID = nil
         currentLanguage = nil
         engineState = .idle
+
+        guard let process, let input else { return }
+        processGenerationGate.scheduleTeardown {
+            await Self.shutDown(process: process, input: input)
+        }
+    }
+
+    /// Gives the native supervisor time to finish its bounded process-group
+    /// teardown before AppKit completes a cooperative application termination.
+    func shutDownForApplicationTermination() async {
+        stopEngine()
+        await processGenerationGate.waitForTeardown()
     }
 
     // MARK: – Private
@@ -291,13 +358,21 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         streamingOnEvent = nil
     }
 
-    private func ensureSidecarProcess(model: STTModel, language: String) throws {
+    private func ensureSidecarProcess(model: STTModel, language: String) async throws {
         if let sidecarProcess, sidecarProcess.isRunning, currentModelID == model.hubID, currentLanguage == language {
+            guard sidecarIsReady else {
+                throw SidecarError.notReady
+            }
             return
         }
 
+        await processGenerationGate.waitForTeardown()
+        try Task.checkCancellation()
+
         if let sidecarProcess, sidecarProcess.isRunning {
             stopEngine()
+            await processGenerationGate.waitForTeardown()
+            try Task.checkCancellation()
         }
 
         guard let scriptURL = findSidecarScriptURL() else {
@@ -317,12 +392,18 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
             throw SidecarError.runtimeNeedsInstall(message)
         }
 
-        process.executableURL = launchPlan.executableURL
-        process.arguments = launchPlan.arguments
+        let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+            executableURL: launchPlan.executableURL,
+            arguments: launchPlan.arguments
+        )
+
+        process.executableURL = supervisedPlan.executableURL
+        process.arguments = supervisedPlan.arguments
         process.currentDirectoryURL = launchPlan.workingDirectoryURL
-        process.environment = ProcessInfo.processInfo.environment
-            .merging(launchPlan.environment) { _, new in new }
-            .merging(["PYTHONUNBUFFERED": "1"]) { _, new in new }
+        process.environment = makeSidecarProcessEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            overrides: launchPlan.environment
+        )
         process.standardInput = input
         process.standardOutput = output
         process.standardError = error
@@ -336,6 +417,9 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         }
 
         engineState = .starting
+        sidecarIsReady = false
+        let generation = await processGenerationGate.beginLaunch()
+        try Task.checkCancellation()
         try process.run()
         sidecarProcess = process
         sidecarInput = input
@@ -343,7 +427,38 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         sidecarError = error
         currentModelID = model.hubID
         currentLanguage = language
-        engineState = .ready
+
+        let readinessChannel = PipeJSONLinesMessageChannel(input: input, output: output)
+        await readinessChannel.start()
+        let verdict = await SidecarReadinessProbe(
+            channel: readinessChannel,
+            clock: ContinuousSidecarReadinessClock()
+        ).check()
+        await readinessChannel.stop()
+        try Task.checkCancellation()
+
+        guard processGenerationGate.isCurrent(generation), sidecarProcess === process else {
+            await Self.shutDown(process: process, input: input)
+            throw CancellationError()
+        }
+
+        switch verdict {
+        case .available:
+            sidecarIsReady = true
+            lastErrorReason = nil
+            engineState = .ready
+        case .unavailable(let reason):
+            lastErrorReason = reason
+            sidecarProcess = nil
+            sidecarInput = nil
+            sidecarOutput = nil
+            sidecarError = nil
+            sidecarIsReady = false
+            currentModelID = nil
+            currentLanguage = nil
+            await Self.shutDown(process: process, input: input)
+            throw SidecarError.message(reason)
+        }
     }
 
     private func findSidecarScriptURL() -> URL? {
@@ -370,12 +485,17 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
     private static func runOneShotSidecarProcess(launchPlan: SidecarLaunchPlan) async throws {
         try await Task.detached(priority: .utility) {
             let process = Process()
-            process.executableURL = launchPlan.executableURL
-            process.arguments = launchPlan.arguments
+            let supervisedPlan = try ProductProcessSupervisorLocator.wrap(
+                executableURL: launchPlan.executableURL,
+                arguments: launchPlan.arguments
+            )
+            process.executableURL = supervisedPlan.executableURL
+            process.arguments = supervisedPlan.arguments
             process.currentDirectoryURL = launchPlan.workingDirectoryURL
-            process.environment = ProcessInfo.processInfo.environment
-                .merging(launchPlan.environment) { _, new in new }
-                .merging(["PYTHONUNBUFFERED": "1"]) { _, new in new }
+            process.environment = makeSidecarProcessEnvironment(
+                base: ProcessInfo.processInfo.environment,
+                overrides: launchPlan.environment
+            )
 
             let logURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("magic-voice-sidecar-\(UUID().uuidString).log")
@@ -405,11 +525,11 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
         }.value
     }
 
-    private func writeJSONLine(_ object: [String: String], to pipe: Pipe) throws {
+    nonisolated private static func writeJSONLine(_ object: [String: String], to pipe: Pipe) throws {
         let data = try JSONSerialization.data(withJSONObject: object)
         guard var line = String(data: data, encoding: .utf8) else { return }
         line.append("\n")
-        pipe.fileHandleForWriting.write(Data(line.utf8))
+        try pipe.fileHandleForWriting.write(contentsOf: Data(line.utf8))
     }
 
     private func writeJSONLineAsync(_ object: [String: String], to pipe: Pipe) {
@@ -437,6 +557,55 @@ final class SidecarTranscriptionEngine: ObservableObject, TranscriptionEngine {
             engineState = .idle
         default:
             break
+        }
+    }
+
+    private static func shutDown(process: Process, input: Pipe) async {
+        var policy = SidecarLifecyclePolicy()
+        apply(policy.handle(.shutdownRequested), process: process, input: input)
+
+        if await waitForExit(process, pollCount: 20) {
+            apply(policy.handle(.childObservedExited), process: process, input: input)
+            return
+        }
+
+        apply(policy.handle(.graceTimeoutElapsed), process: process, input: input)
+        if await waitForExit(process, pollCount: 80) {
+            apply(policy.handle(.childObservedExited), process: process, input: input)
+            return
+        }
+
+        apply(policy.handle(.graceTimeoutElapsed), process: process, input: input)
+    }
+
+    private static func waitForExit(_ process: Process, pollCount: Int) async -> Bool {
+        for _ in 0..<pollCount {
+            if !process.isRunning { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return !process.isRunning
+    }
+
+    private static func apply(
+        _ actions: [SidecarLifecyclePolicy.Action],
+        process: Process,
+        input: Pipe
+    ) {
+        for action in actions {
+            switch action {
+            case .sendGracefulShutdown:
+                try? writeJSONLine(SidecarJSONLinesMessage(type: "shutdown").fields, to: input)
+            case .sendSIGTERM:
+                if process.isRunning {
+                    process.terminate()
+                }
+            case .sendSIGKILL:
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
+            case .markTerminated:
+                break
+            }
         }
     }
 
@@ -492,6 +661,7 @@ private enum SidecarError: LocalizedError {
     case scriptMissing
     case runtimeNeedsInstall(String)
     case notConnected
+    case notReady
     case endedUnexpectedly
     case message(String)
 
@@ -503,6 +673,8 @@ private enum SidecarError: LocalizedError {
             return message
         case .notConnected:
             return "sidecar pipes are not connected"
+        case .notReady:
+            return "sidecar process has not completed its readiness handshake"
         case .endedUnexpectedly:
             return "sidecar output ended unexpectedly"
         case .message(let message):

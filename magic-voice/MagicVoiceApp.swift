@@ -18,10 +18,20 @@ struct MagicVoiceApp: App {
     @StateObject private var dictationSession: DictationSession
     @StateObject private var textInjector: TextInjector
     @StateObject private var transcriptionEngine: SidecarTranscriptionEngine
+    @StateObject private var runtimeProvisioner: ManagedRuntimeProvisioner
     @StateObject private var loginItemController: LoginItemController
     @StateObject private var firstRunSetupController: FirstRunSetupController
+    private let smokeLaunchMode: SidecarSmokeLaunchMode?
+    private let isProcessSupervisorSmoke: Bool
 
     init() {
+        let smokeLaunchMode = parseSidecarSmokeLaunchMode(
+            arguments: ProcessInfo.processInfo.arguments
+        )
+        self.smokeLaunchMode = smokeLaunchMode
+        self.isProcessSupervisorSmoke = parseProcessSupervisorHostDeathSmokeRequest(
+            arguments: ProcessInfo.processInfo.arguments
+        ) != nil
         let settings = SettingsStore()
         let notchManager = NotchWindowManager()
         let permissionController = PermissionController()
@@ -29,10 +39,12 @@ struct MagicVoiceApp: App {
         audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
         let textInjector = TextInjector(permissionController: permissionController)
         let transcriptionEngine = SidecarTranscriptionEngine()
+        let runtimeProvisioner = ManagedRuntimeProvisioner()
         let firstRunSetupController = FirstRunSetupController(
             settings: settings,
             permissionController: permissionController,
-            engine: transcriptionEngine
+            engine: transcriptionEngine,
+            runtimeProvisioner: runtimeProvisioner
         )
         let dictationSession = DictationSession(
             settings: settings,
@@ -54,17 +66,31 @@ struct MagicVoiceApp: App {
         _audioCaptureManager = StateObject(wrappedValue: audioCaptureManager)
         _textInjector = StateObject(wrappedValue: textInjector)
         _transcriptionEngine = StateObject(wrappedValue: transcriptionEngine)
+        _runtimeProvisioner = StateObject(wrappedValue: runtimeProvisioner)
         _firstRunSetupController = StateObject(wrappedValue: firstRunSetupController)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
+        appDelegate.installApplicationTerminationHandler { [weak transcriptionEngine] in
+            await transcriptionEngine?.shutDownForApplicationTermination()
+        }
+
+        guard smokeLaunchMode == nil, !isProcessSupervisorSmoke else { return }
+
         Task { @MainActor in
+            if runtimeProvisioner.requiresProvisioning {
+                let result = await runtimeProvisioner.provision()
+                guard result == .provisioned || result == .alreadyProvisioned else {
+                    dictationSession.startHotkeyMonitoringOnLaunch()
+                    return
+                }
+            }
             firstRunSetupController.evaluate()
             dictationSession.startHotkeyMonitoringOnLaunch()
         }
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: .constant(smokeLaunchMode == nil && !isProcessSupervisorSmoke)) {
             MenuBarView()
                 .environmentObject(settings)
                 .environmentObject(notchManager)
@@ -73,6 +99,7 @@ struct MagicVoiceApp: App {
                 .environmentObject(dictationSession)
                 .environmentObject(textInjector)
                 .environmentObject(transcriptionEngine)
+                .environmentObject(runtimeProvisioner)
                 .environmentObject(firstRunSetupController)
         } label: {
             Image(nsImage: MenuBarGlyph.image(for: MenuBarStatusModel.glyph(
@@ -105,6 +132,7 @@ final class FirstRunSetupController: ObservableObject {
     private let settings: SettingsStore
     private let permissionController: PermissionController
     private let engine: SidecarTranscriptionEngine
+    private let runtimeProvisioner: ManagedRuntimeProvisioner
     private weak var dictationSession: DictationSession?
     private var setupModelInFlight: STTModel?
     private var cancellables: Set<AnyCancellable> = []
@@ -112,11 +140,13 @@ final class FirstRunSetupController: ObservableObject {
     init(
         settings: SettingsStore,
         permissionController: PermissionController,
-        engine: SidecarTranscriptionEngine
+        engine: SidecarTranscriptionEngine,
+        runtimeProvisioner: ManagedRuntimeProvisioner
     ) {
         self.settings = settings
         self.permissionController = permissionController
         self.engine = engine
+        self.runtimeProvisioner = runtimeProvisioner
 
         permissionController.$statuses
             .sink { [weak self] _ in self?.evaluate() }
@@ -141,6 +171,11 @@ final class FirstRunSetupController: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in self?.evaluate() }
             .store(in: &cancellables)
+
+        runtimeProvisioner.$state
+            .dropFirst()
+            .sink { [weak self] _ in self?.evaluate() }
+            .store(in: &cancellables)
     }
 
     func attach(dictationSession: DictationSession) {
@@ -149,6 +184,12 @@ final class FirstRunSetupController: ObservableObject {
 
     func evaluate() {
         markCompletedSetupIfNeeded()
+
+        guard runtimeProvisioner.state == .ready else {
+            isSettingUp = false
+            updateHotkeySuspension()
+            return
+        }
 
         let model = settings.selectedModel
 
@@ -198,6 +239,8 @@ final class FirstRunSetupController: ObservableObject {
     }
 
     func downloadSelectedModel() {
+        guard runtimeProvisioner.state == .ready else { return }
+
         guard engine.engineState != .loadingModel else {
             isSettingUp = setupModelInFlight != nil
             updateHotkeySuspension()
@@ -211,7 +254,8 @@ final class FirstRunSetupController: ObservableObject {
     }
 
     func retry() {
-        guard permissionController.allRequiredPermissionsGranted else { return }
+        guard runtimeProvisioner.state == .ready,
+              permissionController.allRequiredPermissionsGranted else { return }
         setupModelInFlight = nil
         isSettingUp = false
         engine.stopEngine()

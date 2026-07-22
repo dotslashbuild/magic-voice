@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Iterable
@@ -13,10 +15,12 @@ import numpy as np
 DEFAULT_MODEL = "mlx-community/nemotron-3.5-asr-streaming-0.6b"
 LOW_MEMORY_MODEL = "mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit"
 VALID_ATT_CONTEXTS = {(56, 0), (56, 3), (56, 6), (56, 13)}
+_emit_lock = threading.Lock()
 
 
 def emit(message: dict) -> None:
-    print(json.dumps(message, ensure_ascii=False), flush=True)
+    with _emit_lock:
+        print(json.dumps(message, ensure_ascii=False), flush=True)
 
 
 def log(message: str) -> None:
@@ -222,6 +226,8 @@ class NemotronSidecar:
         self.chunk_seconds = chunk_seconds
         self.model = None
         self.streams = {}
+        self.cancelled_streams = set()
+        self.stream_lock = threading.Lock()
 
     def ensure_model(self):
         if self.model is not None:
@@ -257,15 +263,22 @@ class NemotronSidecar:
 
     def start_stream(self, *, request_id: str) -> None:
         self.ensure_model()
-        self.streams[request_id] = {
+        stream = {
             "session": NemotronStreamingSession(self.model, language=self.language),
             "previous_text": "",
             "started": time.monotonic(),
         }
-        emit({"type": "started", "request_id": request_id})
+        with self.stream_lock:
+            if request_id in self.cancelled_streams:
+                return
+            self.streams[request_id] = stream
+            emit({"type": "started", "request_id": request_id})
 
     def feed_stream(self, samples: np.ndarray, *, request_id: str) -> None:
-        stream = self.streams.get(request_id)
+        with self.stream_lock:
+            if request_id in self.cancelled_streams:
+                return
+            stream = self.streams.get(request_id)
         if stream is None:
             raise RuntimeError(f"stream not found: {request_id}")
 
@@ -278,7 +291,10 @@ class NemotronSidecar:
         )
 
     def finish_stream(self, *, request_id: str) -> None:
-        stream = self.streams.pop(request_id, None)
+        with self.stream_lock:
+            if request_id in self.cancelled_streams:
+                return
+            stream = self.streams.pop(request_id, None)
         if stream is None:
             raise RuntimeError(f"stream not found: {request_id}")
 
@@ -286,7 +302,14 @@ class NemotronSidecar:
         previous_text = stream["previous_text"]
         final_text = self._emit_updates(session.finish(), previous_text, request_id=request_id)
         elapsed = time.monotonic() - stream["started"]
-        emit({"type": "done", "request_id": request_id, "text": final_text.strip(), "elapsed": elapsed})
+        with self.stream_lock:
+            if request_id not in self.cancelled_streams:
+                emit({"type": "done", "request_id": request_id, "text": final_text.strip(), "elapsed": elapsed})
+
+    def cancel_stream(self, *, request_id: str) -> None:
+        with self.stream_lock:
+            self.streams.pop(request_id, None)
+            self.cancelled_streams.add(request_id)
 
     def _emit_updates(self, updates, previous_text: str, *, request_id: str | None) -> str:
         for result in updates:
@@ -296,7 +319,10 @@ class NemotronSidecar:
             else:
                 delta = current_text
             if delta:
-                emit({"type": "chunk", "request_id": request_id, "text": delta, "transcript": current_text})
+                with self.stream_lock:
+                    if request_id in self.cancelled_streams:
+                        return previous_text
+                    emit({"type": "chunk", "request_id": request_id, "text": delta, "transcript": current_text})
             previous_text = current_text
         return previous_text
 
@@ -327,12 +353,30 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     emit({"type": "status", "state": "booted", "model": sidecar.model_id})
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
+    messages: queue.Queue[dict | None] = queue.Queue()
+
+    def read_messages() -> None:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+                if message.get("type") == "cancel_stream":
+                    sidecar.cancel_stream(request_id=message["request_id"])
+                else:
+                    messages.put(message)
+            except Exception as exc:
+                emit({"type": "error", "message": str(exc)})
+        messages.put(None)
+
+    threading.Thread(target=read_messages, name="sidecar-stdin", daemon=True).start()
+
+    while True:
+        message = messages.get()
+        if message is None:
+            return 0
         try:
-            message = json.loads(line)
             message_type = message.get("type")
             if message_type == "ping":
                 emit({"type": "pong"})

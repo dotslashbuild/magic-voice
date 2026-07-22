@@ -26,7 +26,7 @@ Hold `fn` to dictate. Double-tap `fn` to start and stop. Keep writing.
 | Permissions | Microphone and Accessibility only |
 | Privacy | No audio upload in the current local engine path |
 | Menu bar | Compact control center, recent transcripts, microphone/language/shortcut pickers |
-| Runtime | Developer `uv` flow works; public packaged runtime is in progress |
+| Runtime | Developer `uv` flow and managed first-run provisioning work, with supervised subprocess cleanup; the signed public package is still in progress |
 
 ## Public Install Status
 
@@ -129,12 +129,27 @@ magic-voice/
   Permissions/      Microphone and Accessibility status
 magic-voiceTests/   Swift Testing unit tests and fakes
 sidecar/            Python Nemotron MLX transcription process
+process-supervisor/ Native macOS owner for uv/Python process groups
 docs/               Packaging notes and design plans
 ```
 
 ## Release Status
 
-The source repo is usable for local development. Public binary distribution still needs a packaging pass: deployment target check, bundled sidecar resources, runtime strategy, notarization, smoke test, and third-party license inventory.
+The source repo is usable for local development. The app can provision a bundled
+`uv` runtime into Application Support on first launch; the release pipeline still
+needs to supply and sign that `uv` artifact. An embedded native helper owns the
+process group for the main sidecar, one-shot model downloads, app smoke checks,
+and managed-runtime provisioning, so their `uv` and Python descendants cannot
+outlive an app crash or Force Quit. On a normal quit the app sends the sidecar's
+JSON shutdown message and defers termination while cleanup runs. If the app exits
+unexpectedly, the helper observes that exact parent with `kqueue`, sends `SIGTERM`
+to the worker group, waits three seconds, then uses `SIGKILL` if needed.
+
+The helper is embedded at
+`Contents/MacOS/MagicVoiceProcessSupervisor` and must be arm64 and Developer ID
+signed inside-out with the rest of the app. Public binary distribution also needs
+notarization, a clean-account packaging smoke test, and a third-party license
+inventory.
 
 See [docs/PACKAGING.md](docs/PACKAGING.md) before shipping.
 

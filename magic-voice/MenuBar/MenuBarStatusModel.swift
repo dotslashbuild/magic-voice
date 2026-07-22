@@ -20,6 +20,7 @@ struct MenuBarStatus: Equatable {
         case permissions(missing: [PermissionKind])
         case setup(message: String)
         case engine(message: String)
+        case runtime(message: String, canRetry: Bool)
     }
 
     let statusWord: String
@@ -44,11 +45,16 @@ enum MenuBarStatusModel {
         setupRequired: Bool = false,
         engineState: TranscriptionEngineState,
         engineErrorReason: String?,
+        runtimeProvisioningState: ManagedRuntimeProvisioningState = .ready,
         notchActive: Bool,
         monitoringEnabled: Bool
     ) -> MenuBarStatus {
         let banner: MenuBarStatus.Banner?
-        if !missingPermissions.isEmpty {
+        if case .provisioning(let progress) = runtimeProvisioningState {
+            banner = .runtime(message: progress.rawValue, canRetry: false)
+        } else if case .failed(let message) = runtimeProvisioningState {
+            banner = .runtime(message: message, canRetry: true)
+        } else if !missingPermissions.isEmpty {
             banner = .permissions(missing: missingPermissions)
         } else if engineState == .unavailable {
             banner = .engine(message: "Speech engine needs attention")
@@ -61,14 +67,20 @@ enum MenuBarStatusModel {
         let statusWord: String
         if notchActive {
             statusWord = "Recording"
+        } else if case .provisioning = runtimeProvisioningState {
+            statusWord = "Setting Up"
         } else if engineState == .loadingModel {
             statusWord = "Paused"
         } else if case .setup = banner {
             statusWord = "Setting Up"
         } else if banner != nil {
             statusWord = "Error"
+        } else if !monitoringEnabled {
+            statusWord = "Paused"
+        } else if engineState == .starting {
+            statusWord = "Starting"
         } else {
-            statusWord = monitoringEnabled ? "Ready" : "Paused"
+            statusWord = "Ready"
         }
 
         return MenuBarStatus(

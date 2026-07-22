@@ -8,6 +8,18 @@
 
 import SwiftUI
 
+@MainActor
+enum ManagedRuntimeRetryAction {
+    static func perform(
+        provision: () async -> ManagedRuntimeProvisioningResult,
+        onSuccess: () -> Void
+    ) async {
+        let result = await provision()
+        guard result == .provisioned || result == .alreadyProvisioned else { return }
+        onSuccess()
+    }
+}
+
 struct MenuBarView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var notchManager: NotchWindowManager
@@ -15,6 +27,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var audioCaptureManager: AudioCaptureManager
     @EnvironmentObject private var dictationSession: DictationSession
     @EnvironmentObject private var transcriptionEngine: SidecarTranscriptionEngine
+    @EnvironmentObject private var runtimeProvisioner: ManagedRuntimeProvisioner
     @EnvironmentObject private var firstRunSetupController: FirstRunSetupController
     @Environment(\.openSettings) private var openSettings
 
@@ -28,6 +41,7 @@ struct MenuBarView: View {
             setupRequired: !settings.isSetupComplete(for: settings.selectedModel),
             engineState: transcriptionEngine.engineState,
             engineErrorReason: transcriptionEngine.lastErrorReason,
+            runtimeProvisioningState: runtimeProvisioner.state,
             notchActive: notchManager.state != .collapsed,
             monitoringEnabled: dictationSession.hotkeyMonitoringEnabled
         )
@@ -115,6 +129,31 @@ struct MenuBarView: View {
                         }
                     }
                     .controlSize(.small)
+                }
+
+            case .runtime(let message, let canRetry):
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: canRetry ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath")
+                        .foregroundStyle(canRetry ? .orange : .secondary)
+                    Text(message)
+                        .font(.callout)
+                        .lineLimit(3)
+                    Spacer()
+                    if canRetry {
+                        Button("Retry") {
+                            Task { @MainActor in
+                                await ManagedRuntimeRetryAction.perform(
+                                    provision: {
+                                        await runtimeProvisioner.provision()
+                                    },
+                                    onSuccess: {
+                                        firstRunSetupController.evaluate()
+                                    }
+                                )
+                            }
+                        }
+                        .controlSize(.small)
+                    }
                 }
 
             case .setup(let message):
@@ -426,10 +465,12 @@ struct MenuBarView: View {
     let audioCaptureManager = AudioCaptureManager(permissionController: permissionController)
     let textInjector = TextInjector(permissionController: permissionController)
     let transcriptionEngine = SidecarTranscriptionEngine()
+    let runtimeProvisioner = ManagedRuntimeProvisioner()
     let firstRunSetupController = FirstRunSetupController(
         settings: settings,
         permissionController: permissionController,
-        engine: transcriptionEngine
+        engine: transcriptionEngine,
+        runtimeProvisioner: runtimeProvisioner
     )
 
     MenuBarView()
@@ -439,6 +480,7 @@ struct MenuBarView: View {
         .environmentObject(audioCaptureManager)
         .environmentObject(textInjector)
         .environmentObject(transcriptionEngine)
+        .environmentObject(runtimeProvisioner)
         .environmentObject(firstRunSetupController)
         .environmentObject(DictationSession(
             settings: settings,

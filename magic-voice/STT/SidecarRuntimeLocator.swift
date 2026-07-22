@@ -47,125 +47,22 @@ extension SidecarRuntimeLocator {
 }
 
 struct ProductSidecarRuntimeLocator: SidecarRuntimeLocator {
-    private let managedLocator: ManagedUvRuntimeLocator
+    private let bundledLocator: BundledRuntimeLocator
     private let developmentLocator: DevelopmentUvLocator
 
     init(
-        managedLocator: ManagedUvRuntimeLocator = ManagedUvRuntimeLocator(),
+        bundledLocator: BundledRuntimeLocator = BundledRuntimeLocator(),
         developmentLocator: DevelopmentUvLocator = DevelopmentUvLocator()
     ) {
-        self.managedLocator = managedLocator
+        self.bundledLocator = bundledLocator
         self.developmentLocator = developmentLocator
     }
 
     func locate(scriptURL: URL, model: STTModel, language: String, mode: SidecarLaunchMode) -> SidecarRuntimeOutcome {
-        switch managedLocator.locate(scriptURL: scriptURL, model: model, language: language, mode: mode) {
-        case .ready(let plan):
-            return .ready(plan)
-        case .needsInstall:
+        guard bundledLocator.hasBundledDistribution else {
             return developmentLocator.locate(scriptURL: scriptURL, model: model, language: language, mode: mode)
         }
-    }
-}
-
-struct ManagedUvRuntimeLocator: SidecarRuntimeLocator {
-    var bundledUvURL: URL?
-    var applicationSupportDirectoryURL: URL
-    var isExecutable: (String) -> Bool
-    var fileManager: FileManager
-
-    init(
-        bundledUvURL: URL? = Bundle.main.url(forResource: "uv", withExtension: nil),
-        applicationSupportDirectoryURL: URL? = nil,
-        isExecutable: @escaping (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        fileManager: FileManager = .default
-    ) {
-        self.bundledUvURL = bundledUvURL
-        self.applicationSupportDirectoryURL = applicationSupportDirectoryURL
-            ?? ManagedUvRuntimeLocator.defaultApplicationSupportDirectory(fileManager: fileManager)
-        self.isExecutable = isExecutable
-        self.fileManager = fileManager
-    }
-
-    func locate(scriptURL: URL, model: STTModel, language: String, mode: SidecarLaunchMode) -> SidecarRuntimeOutcome {
-        guard let bundledUvURL, isExecutable(bundledUvURL.path) else {
-            return .needsInstall(message: "Bundled uv runtime is missing from this build.")
-        }
-
-        do {
-            let managedProjectURL = try prepareManagedProject(from: scriptURL)
-            let supportURL = applicationSupportDirectoryURL
-            let managedScriptURL = managedProjectURL.appendingPathComponent("sidecar.py")
-            let sidecarArguments = ["--model", model.hubID, "--language", language] + mode.sidecarArguments
-
-            return .ready(SidecarLaunchPlan(
-                executableURL: bundledUvURL,
-                arguments: [
-                    "--project", managedProjectURL.path,
-                    "run",
-                    "--frozen",
-                    "--managed-python",
-                    "--python", "3.12",
-                    "python",
-                    managedScriptURL.path
-                ] + sidecarArguments,
-                workingDirectoryURL: managedProjectURL,
-                environment: [
-                    "UV_PROJECT_ENVIRONMENT": supportURL.appendingPathComponent("Sidecar/.venv").path,
-                    "UV_PYTHON_INSTALL_DIR": supportURL.appendingPathComponent("Python").path,
-                    "UV_CACHE_DIR": supportURL.appendingPathComponent("uv-cache").path,
-                    "HF_HOME": supportURL.appendingPathComponent("ModelCache/huggingface").path,
-                    "HF_HUB_CACHE": supportURL.appendingPathComponent("ModelCache/huggingface/hub").path
-                ]
-            ))
-        } catch {
-            return .needsInstall(message: "Failed to prepare the managed sidecar runtime: \(error.localizedDescription)")
-        }
-    }
-
-    private func prepareManagedProject(from scriptURL: URL) throws -> URL {
-        let projectURL = applicationSupportDirectoryURL.appendingPathComponent("Sidecar", isDirectory: true)
-        try fileManager.createDirectory(at: projectURL, withIntermediateDirectories: true)
-
-        let sourceDirectoryURL = scriptURL.deletingLastPathComponent()
-        try copyIfChanged(from: scriptURL, to: projectURL.appendingPathComponent("sidecar.py"))
-        try copyIfChanged(
-            from: sourceDirectoryURL.appendingPathComponent("pyproject.toml"),
-            to: projectURL.appendingPathComponent("pyproject.toml")
-        )
-        try copyIfChanged(
-            from: sourceDirectoryURL.appendingPathComponent("uv.lock"),
-            to: projectURL.appendingPathComponent("uv.lock")
-        )
-
-        return projectURL
-    }
-
-    private func copyIfChanged(from sourceURL: URL, to destinationURL: URL) throws {
-        guard fileManager.fileExists(atPath: sourceURL.path) else {
-            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: sourceURL.path])
-        }
-
-        if fileManager.fileExists(atPath: destinationURL.path) {
-            guard !fileManager.contentsEqual(atPath: sourceURL.path, andPath: destinationURL.path) else {
-                return
-            }
-            try fileManager.removeItem(at: destinationURL)
-        }
-
-        try fileManager.copyItem(at: sourceURL, to: destinationURL)
-    }
-
-    private static func defaultApplicationSupportDirectory(fileManager: FileManager) -> URL {
-        let baseURL = try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let appDirectoryName = Bundle.main.bundleIdentifier ?? "Magic Voice"
-        return (baseURL ?? URL(fileURLWithPath: NSTemporaryDirectory()))
-            .appendingPathComponent(appDirectoryName, isDirectory: true)
+        return bundledLocator.locate(scriptURL: scriptURL, model: model, language: language, mode: mode)
     }
 }
 
@@ -228,12 +125,54 @@ struct DevelopmentUvLocator: SidecarRuntimeLocator {
 }
 
 struct BundledRuntimeLocator: SidecarRuntimeLocator {
+    private let bundle: any RuntimeBundleResourceProviding
+    private let fileSystem: any RuntimeFileSystem
+    private let layout: ManagedRuntimeLayout
+
+    init(
+        bundle: any RuntimeBundleResourceProviding = MainRuntimeBundle(),
+        applicationSupportDirectoryURL: URL? = nil,
+        fileSystem: any RuntimeFileSystem = FileManagerRuntimeFileSystem()
+    ) {
+        self.bundle = bundle
+        self.fileSystem = fileSystem
+        self.layout = ManagedRuntimeLayout(
+            applicationSupportDirectoryURL: applicationSupportDirectoryURL
+                ?? ManagedRuntimeLayout.defaultApplicationSupportDirectory()
+        )
+    }
+
+    var hasBundledDistribution: Bool {
+        BundledRuntimeAssets.resolve(from: bundle) != nil
+    }
+
     func locate(scriptURL: URL, model: STTModel, language: String, mode: SidecarLaunchMode) -> SidecarRuntimeOutcome {
-        .needsInstall(message: "A bundled Magic Voice Python runtime is not included in this build yet.")
+        guard let assets = BundledRuntimeAssets.resolve(from: bundle) else {
+            return .needsInstall(message: "Bundled uv and sidecar assets are missing from this build.")
+        }
+        guard ManagedRuntimeValidation.isValid(assets: assets, layout: layout, fileSystem: fileSystem) else {
+            return .needsInstall(message: "Magic Voice is preparing its managed transcription runtime.")
+        }
+
+        let sidecarArguments = ["--model", model.hubID, "--language", language] + mode.sidecarArguments
+        return .ready(SidecarLaunchPlan(
+            executableURL: layout.uvURL,
+            arguments: [
+                "--project", layout.projectURL.path,
+                "run",
+                "--frozen",
+                "--managed-python",
+                "--python", ManagedRuntimeLayout.pythonVersion,
+                "python",
+                layout.sidecarScriptURL.path
+            ] + sidecarArguments,
+            workingDirectoryURL: layout.projectURL,
+            environment: layout.environment
+        ))
     }
 }
 
-private extension SidecarLaunchMode {
+extension SidecarLaunchMode {
     var sidecarArguments: [String] {
         switch self {
         case .serve:
