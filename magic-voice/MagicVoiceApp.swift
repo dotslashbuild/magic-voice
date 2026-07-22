@@ -19,8 +19,13 @@ struct MagicVoiceApp: App {
     @StateObject private var transcriptionEngine: SidecarTranscriptionEngine
     @StateObject private var runtimeProvisioner: ManagedRuntimeProvisioner
     @StateObject private var loginItemController: LoginItemController
+    private let smokeLaunchMode: SidecarSmokeLaunchMode?
 
     init() {
+        let smokeLaunchMode = parseSidecarSmokeLaunchMode(
+            arguments: ProcessInfo.processInfo.arguments
+        )
+        self.smokeLaunchMode = smokeLaunchMode
         let settings = SettingsStore()
         let notchManager = NotchWindowManager()
         let permissionController = PermissionController()
@@ -51,6 +56,8 @@ struct MagicVoiceApp: App {
         _runtimeProvisioner = StateObject(wrappedValue: runtimeProvisioner)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
+        guard smokeLaunchMode == nil else { return }
+
         Task { @MainActor in
             if runtimeProvisioner.requiresProvisioning {
                 let result = await runtimeProvisioner.provision()
@@ -68,7 +75,7 @@ struct MagicVoiceApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: .constant(smokeLaunchMode == nil)) {
             MenuBarView()
                 .environmentObject(settings)
                 .environmentObject(notchManager)
