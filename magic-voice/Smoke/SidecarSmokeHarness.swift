@@ -173,6 +173,24 @@ final class SidecarSmokeHarness {
                 }
             }
 
+            if case .failed(let reason) = contract.terminalEvent {
+                return .failure("sidecar emitted terminal failure: \(reason)")
+            }
+
+            // A second ping is an ordering barrier: the sidecar handles stdin
+            // serially and emits stdout serially, so seeing its pong proves we
+            // consumed every event queued by finish_stream. This lets the smoke
+            // check enforce exactly one terminal event without an arbitrary
+            // post-final sleep.
+            try await process.send(SidecarJSONLinesMessage(type: "ping"))
+            while true {
+                let message = try await receiveBeforeSessionTimeout()
+                if message.type == "pong" { break }
+                if let failure = contract.consume(message, requestID: requestID) {
+                    return .failure(failure)
+                }
+            }
+
             switch contract.terminalEvent {
             case .final:
                 return .success("readiness, streaming contract, and clean lifecycle verified")

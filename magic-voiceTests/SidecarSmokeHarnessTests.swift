@@ -21,7 +21,8 @@ struct SidecarSmokeHarnessTests {
                     "type": "chunk", "request_id": "request",
                     "text": "", "transcript": ""
                 ]),
-                SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""])
+                SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""]),
+                SidecarJSONLinesMessage(type: "pong")
             ],
             exitBehavior: .graceful
         )
@@ -35,7 +36,9 @@ struct SidecarSmokeHarnessTests {
         #expect(await process.isChildRunning() == false)
 
         let sent = await process.sentMessages
-        #expect(sent.map(\.type) == ["ping", "start_stream", "audio_chunk", "finish_stream"])
+        #expect(sent.map(\.type) == [
+            "ping", "start_stream", "audio_chunk", "finish_stream", "ping"
+        ])
         let audio = sent[2].fields["data"].flatMap { Data(base64Encoded: $0) }
         #expect(audio?.count == 1_600 * MemoryLayout<Float>.size)
         #expect(audio?.allSatisfy { $0 == 0 } == true)
@@ -100,6 +103,26 @@ struct SidecarSmokeHarnessTests {
     }
 
     @Test
+    func duplicateTerminalBeforePostSessionPongReportsFail() async {
+        let process = FakeSmokeProcess(
+            messages: [
+                SidecarJSONLinesMessage(type: "pong"),
+                SidecarJSONLinesMessage(["type": "started", "request_id": "request"]),
+                SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""]),
+                SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""]),
+                SidecarJSONLinesMessage(type: "pong")
+            ],
+            exitBehavior: .graceful
+        )
+
+        let result = await makeHarness(process: process, sink: FakeSmokeExitSink()).run()
+
+        #expect(!result.passed)
+        #expect(result.reason == "streaming contract emitted more than one terminal event")
+        #expect(await process.actions == [.sendGracefulShutdown, .markTerminated])
+    }
+
+    @Test
     func teardownEscalationToSIGKILLReportsFail() async {
         let process = FakeSmokeProcess(
             messages: successfulMessages,
@@ -157,7 +180,8 @@ struct SidecarSmokeHarnessTests {
         [
             SidecarJSONLinesMessage(type: "pong"),
             SidecarJSONLinesMessage(["type": "started", "request_id": "request"]),
-            SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""])
+            SidecarJSONLinesMessage(["type": "done", "request_id": "request", "text": ""]),
+            SidecarJSONLinesMessage(type: "pong")
         ]
     }
 
