@@ -8,6 +8,18 @@
 
 import SwiftUI
 
+@MainActor
+enum ManagedRuntimeRetryAction {
+    static func perform(
+        provision: () async -> ManagedRuntimeProvisioningResult,
+        restartEngine: () -> Void
+    ) async {
+        let result = await provision()
+        guard result == .provisioned || result == .alreadyProvisioned else { return }
+        restartEngine()
+    }
+}
+
 struct MenuBarView: View {
     @EnvironmentObject private var settings: SettingsStore
     @EnvironmentObject private var notchManager: NotchWindowManager
@@ -125,11 +137,16 @@ struct MenuBarView: View {
                     if canRetry {
                         Button("Retry") {
                             Task { @MainActor in
-                                let result = await runtimeProvisioner.provision()
-                                guard result == .provisioned || result == .alreadyProvisioned else { return }
-                                transcriptionEngine.restartEngine(
-                                    model: settings.selectedModel,
-                                    language: settings.language
+                                await ManagedRuntimeRetryAction.perform(
+                                    provision: {
+                                        await runtimeProvisioner.provision()
+                                    },
+                                    restartEngine: {
+                                        transcriptionEngine.restartEngine(
+                                            model: settings.selectedModel,
+                                            language: settings.language
+                                        )
+                                    }
                                 )
                             }
                         }

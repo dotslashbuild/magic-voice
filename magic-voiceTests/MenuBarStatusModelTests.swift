@@ -102,27 +102,32 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
-    func provisioningRuntimeExplainsSetupWithoutRetry() {
-        let status = MenuBarStatusModel.derive(
-            missingPermissions: [],
-            engineState: .idle,
-            engineErrorReason: nil,
-            runtimeProvisioningState: .provisioning(.synchronizingEnvironment),
-            notchActive: false,
-            monitoringEnabled: true
-        )
+    func everyProvisioningPhaseWinsOverMissingPermissionsWithoutRetry() {
+        let phases: [ManagedRuntimeProvisioningProgress] = [
+            .preparing,
+            .copyingAssets,
+            .synchronizingEnvironment
+        ]
 
-        #expect(status.statusWord == "Setting Up")
-        #expect(status.banner == .runtime(
-            message: "Downloading transcription dependencies…",
-            canRetry: false
-        ))
+        for phase in phases {
+            let status = MenuBarStatusModel.derive(
+                missingPermissions: [.microphone, .accessibility],
+                engineState: .unavailable,
+                engineErrorReason: "engine error",
+                runtimeProvisioningState: .provisioning(phase),
+                notchActive: false,
+                monitoringEnabled: true
+            )
+
+            #expect(status.statusWord == "Setting Up")
+            #expect(status.banner == .runtime(message: phase.rawValue, canRetry: false))
+        }
     }
 
     @Test
-    func failedRuntimeProvidesRetryBannerBeforeEngineError() {
+    func failedRuntimeProvidesRetryBeforePermissionsAndEngineError() {
         let status = MenuBarStatusModel.derive(
-            missingPermissions: [],
+            missingPermissions: [.microphone, .accessibility],
             engineState: .unavailable,
             engineErrorReason: "engine error",
             runtimeProvisioningState: .failed(message: "Runtime setup failed: offline"),
@@ -132,6 +137,45 @@ struct MenuBarStatusModelTests {
 
         #expect(status.statusWord == "Error")
         #expect(status.banner == .runtime(message: "Runtime setup failed: offline", canRetry: true))
+    }
+
+    @Test
+    func readyRuntimeReturnsToPermissionGuidance() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [.microphone, .accessibility],
+            engineState: .unavailable,
+            engineErrorReason: "engine error",
+            runtimeProvisioningState: .ready,
+            notchActive: false,
+            monitoringEnabled: true
+        )
+
+        #expect(status.statusWord == "Error")
+        #expect(status.banner == .permissions(missing: [.microphone, .accessibility]))
+    }
+
+    @Test @MainActor
+    func successfulRuntimeRetryRestartsEngine() async {
+        var didRestartEngine = false
+
+        await ManagedRuntimeRetryAction.perform(
+            provision: { .provisioned },
+            restartEngine: { didRestartEngine = true }
+        )
+
+        #expect(didRestartEngine)
+    }
+
+    @Test @MainActor
+    func failedRuntimeRetryDoesNotRestartEngine() async {
+        var didRestartEngine = false
+
+        await ManagedRuntimeRetryAction.perform(
+            provision: { .failed(message: "still offline") },
+            restartEngine: { didRestartEngine = true }
+        )
+
+        #expect(!didRestartEngine)
     }
 
     @Test

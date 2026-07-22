@@ -43,12 +43,12 @@ enum MenuBarStatusModel {
         monitoringEnabled: Bool
     ) -> MenuBarStatus {
         let banner: MenuBarStatus.Banner?
-        if !missingPermissions.isEmpty {
-            banner = .permissions(missing: missingPermissions)
-        } else if case .provisioning(let progress) = runtimeProvisioningState {
+        if case .provisioning(let progress) = runtimeProvisioningState {
             banner = .runtime(message: progress.rawValue, canRetry: false)
         } else if case .failed(let message) = runtimeProvisioningState {
             banner = .runtime(message: message, canRetry: true)
+        } else if !missingPermissions.isEmpty {
+            banner = .permissions(missing: missingPermissions)
         } else if engineState == .unavailable {
             banner = .engine(message: engineErrorReason ?? "Transcription engine unavailable")
         } else {
@@ -58,7 +58,7 @@ enum MenuBarStatusModel {
         let statusWord: String
         if notchActive {
             statusWord = "Recording"
-        } else if case .provisioning = runtimeProvisioningState, missingPermissions.isEmpty {
+        } else if case .provisioning = runtimeProvisioningState {
             statusWord = "Setting Up"
         } else if banner != nil {
             statusWord = "Error"
