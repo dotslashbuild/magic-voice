@@ -46,13 +46,17 @@
 /* Begin PBXFrameworksBuildPhase section */
 		243B05EE2F5D845700798C35 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AA1B05000000000000000003 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -99,6 +103,8 @@
 				243B06012F5D845700798C35 /* Copy Bundled uv Runtime */,
 			);
 			buildRules = (
+			);
+			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				243B05F32F5D845700798C35 /* magic-voice */,
@@ -171,16 +177,20 @@
 /* Begin PBXResourcesBuildPhase section */
 		243B05EF2F5D845700798C35 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 				243B05F72F5D845700798C35 /* sidecar.py in Resources */,
 				243B05F82F5D845700798C35 /* pyproject.toml in Resources */,
 				243B06002F5D845700798C35 /* uv.lock in Resources */,
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AA1B05000000000000000012 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
@@ -203,20 +213,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\n\nUV_RUNTIME=\"${SRCROOT}/build/uv-runtime/uv\"\nDESTINATION=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/uv\"\n\nif [ ! -x \"${UV_RUNTIME}\" ]; then\n  if [ \"${REQUIRE_BUNDLED_UV:-NO}\" = \"YES\" ]; then\n    echo \"error: staged uv runtime is missing or not executable: ${UV_RUNTIME}\" >&2\n    echo \"Run scripts/stage_uv_runtime.sh before building product apps, or unset REQUIRE_BUNDLED_UV for local Debug builds.\" >&2\n    exit 1\n  fi\n  echo \"warning: staged uv runtime is missing or not executable: ${UV_RUNTIME}; skipping bundled uv copy\" >&2\n  exit 0\nfi\n\nmkdir -p \"$(dirname \"${DESTINATION}\")\"\ninstall -m 755 \"${UV_RUNTIME}\" \"${DESTINATION}\"\n";
+			shellScript = "set -euo pipefail\n\nUV_RUNTIME=\"${SRCROOT}/build/uv-runtime/uv\"\nDESTINATION=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/uv\"\n\nif [ \"${PLATFORM_NAME:-}\" != \"macosx\" ]; then\n  echo \"note: skipping bundled uv copy for PLATFORM_NAME=${PLATFORM_NAME:-unknown}\"\n  exit 0\nfi\n\nif [ ! -x \"${UV_RUNTIME}\" ]; then\n  if [ \"${REQUIRE_BUNDLED_UV:-NO}\" = \"YES\" ]; then\n    echo \"error: staged uv runtime is missing or not executable: ${UV_RUNTIME}\" >&2\n    echo \"Run scripts/stage_uv_runtime.sh before building product apps, or unset REQUIRE_BUNDLED_UV for local Debug builds.\" >&2\n    exit 1\n  fi\n  echo \"warning: staged uv runtime is missing or not executable: ${UV_RUNTIME}; skipping bundled uv copy\" >&2\n  exit 0\nfi\n\nmkdir -p \"$(dirname \"${DESTINATION}\")\"\ninstall -m 755 \"${UV_RUNTIME}\" \"${DESTINATION}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		243B05ED2F5D845700798C35 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AA1B05000000000000000011 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
 			files = (
 			);
+			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -229,7 +243,7 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		243B05FA2F5D845800798C35 /* Debug configuration for PBXProject "magic-voice" */ = {
+		243B05FA2F5D845800798C35 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -290,7 +304,7 @@
 			};
 			name = Debug;
 		};
-		243B05FB2F5D845800798C35 /* Release configuration for PBXProject "magic-voice" */ = {
+		243B05FB2F5D845800798C35 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -343,7 +357,7 @@
 			};
 			name = Release;
 		};
-		243B05FD2F5D845800798C35 /* Debug configuration for PBXNativeTarget "magic-voice" */ = {
+		243B05FD2F5D845800798C35 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -391,7 +405,7 @@
 			};
 			name = Debug;
 		};
-		243B05FE2F5D845800798C35 /* Release configuration for PBXNativeTarget "magic-voice" */ = {
+		243B05FE2F5D845800798C35 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -439,7 +453,7 @@
 			};
 			name = Release;
 		};
-		AA1B05000000000000000021 /* Debug configuration for PBXNativeTarget "magic-voiceTests" */ = {
+		AA1B05000000000000000021 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -459,7 +473,7 @@
 			};
 			name = Debug;
 		};
-		AA1B05000000000000000022 /* Release configuration for PBXNativeTarget "magic-voiceTests" */ = {
+		AA1B05000000000000000022 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -485,25 +499,28 @@
 		243B05EC2F5D845700798C35 /* Build configuration list for PBXProject "magic-voice" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				243B05FA2F5D845800798C35 /* Debug configuration for PBXProject "magic-voice" */,
-				243B05FB2F5D845800798C35 /* Release configuration for PBXProject "magic-voice" */,
+				243B05FA2F5D845800798C35 /* Debug */,
+				243B05FB2F5D845800798C35 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		243B05FC2F5D845800798C35 /* Build configuration list for PBXNativeTarget "magic-voice" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				243B05FD2F5D845800798C35 /* Debug configuration for PBXNativeTarget "magic-voice" */,
-				243B05FE2F5D845800798C35 /* Release configuration for PBXNativeTarget "magic-voice" */,
+				243B05FD2F5D845800798C35 /* Debug */,
+				243B05FE2F5D845800798C35 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		AA1B05000000000000000020 /* Build configuration list for PBXNativeTarget "magic-voiceTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				AA1B05000000000000000021 /* Debug configuration for PBXNativeTarget "magic-voiceTests" */,
-				AA1B05000000000000000022 /* Release configuration for PBXNativeTarget "magic-voiceTests" */,
+				AA1B05000000000000000021 /* Debug */,
+				AA1B05000000000000000022 /* Release */,
 			);
+			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
