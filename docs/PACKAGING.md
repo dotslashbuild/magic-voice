@@ -1,81 +1,265 @@
-# Magic Voice Packaging Checklist
+# Magic Voice Direct-Distribution Runbook
 
-This project is a direct-distribution macOS app. It should not be shipped with App Sandbox enabled because global hotkeys, Accessibility text insertion, clipboard paste fallback, and the Python sidecar need process and system API access that are not App Store sandbox-friendly.
+Magic Voice is distributed outside the Mac App Store. App Sandbox must remain
+off: global activation-key monitoring, Accessibility insertion, clipboard paste
+fallback, and the Python sidecar process do not fit the current sandbox design.
 
-## Xcode Settings
+> **Release gate:** no distributable release is ready until Developer ID signing,
+> Apple notarization, stapling, Gatekeeper verification, clean-account runtime
+> smoke testing, and the dependency/model license review all pass.
 
-- Product name/display name: `Magic Voice`
-- Current project deployment target: macOS 26.2
-- Intended public deployment target: verify before release and keep this file, README, and Xcode settings in sync
-- App Sandbox: Off.
-- Hardened Runtime: enable before Developer ID distribution. The current project file does not declare a hardened-runtime setting.
-- Library validation: disabled in `magic-voice.entitlements` so the future hardened app can load MLX/NumPy native libraries from the managed environment in Application Support.
-- `LSUIElement`: `YES`
-- `NSMicrophoneUsageDescription`: `Magic Voice uses your microphone to transcribe speech locally on your device.`
-- `NSAppleEventsUsageDescription`: `Magic Voice uses Accessibility to insert transcribed text into the active text field.`
+## Release architecture
 
-## Bundle Resources
+The app bundles four runtime resources at the top of `Contents/Resources`:
 
-Before public packaging, add these files to the app target's Copy Bundle Resources phase:
+```text
+Magic Voice.app/Contents/Resources/
+  sidecar.py
+  pyproject.toml
+  uv.lock
+  uv
+```
 
-- `sidecar/sidecar.py`
+`ManagedRuntimeProvisioner` resolves those exact `Bundle.main` resource names.
+On first run it copies them into the user's Application Support directory, then
+runs the bundled `uv` with `--frozen`, managed Python 3.12, and the checked-in
+lockfile. Python, locked packages, and the selected model require network access
+on a clean machine; they are not embedded in the DMG.
+
+The `uv` executable is deliberately not committed or added to Xcode's Copy
+Bundle Resources phase. `scripts/release_macos.sh` downloads it, verifies it,
+injects it at `Contents/Resources/uv`, and signs it before signing the app.
+
+## Fixed release inputs
+
+`scripts/fetch_uv.sh` pins the official Astral `uv` macOS arm64 artifact:
+
+- Version: `0.11.31`
+- Asset: `uv-aarch64-apple-darwin.tar.gz`
+- SHA-256: `b2b93e82a6786f9c7cb89fd4ca0e859a147b292ae8f6f95784f9742f0efec39e`
+- Origin: `https://github.com/astral-sh/uv/releases/tag/0.11.31`
+
+The acquisition step downloads both the archive and its official `.sha256`
+file. It requires the official checksum to equal the trusted value pinned in
+the script, verifies the archive bytes, confirms the extracted file is an arm64
+Mach-O executable, and installs only `uv`. If Astral's checksum and the trusted
+pin differ, the release fails with an instruction to review the release. To
+upgrade `uv`, review Astral's release notes and update the version, asset, and
+checksum together in one auditable change.
+
+The sidecar's Python and dependency inputs remain pinned by:
+
+- `sidecar/.python-version`
 - `sidecar/pyproject.toml`
 - `sidecar/uv.lock`
 
-The project includes `sidecar.py`, `pyproject.toml`, and `uv.lock` as resources. The Swift sidecar launcher first looks in `Bundle.main` for `sidecar.py`, then falls back to the local source tree for developer builds. The managed runtime copies all three files together before launching `uv run --frozen`; packaged builds must include all three files or the sidecar can fail before transcription starts.
+## Xcode and signing policy
 
-## Python Runtime
+The Release app target has:
 
-Developer builds resolve the sidecar launch plan through `SidecarRuntimeLocator`.
-`DevelopmentUvLocator` currently uses `uv` from one of:
+- `ENABLE_HARDENED_RUNTIME = YES`
+- `ENABLE_APP_SANDBOX = NO`
+- `CODE_SIGN_ENTITLEMENTS = magic-voice/magic-voice.entitlements`
+- bundle identifier `ai.arailabs.magic-voice`
+- `LSUIElement = YES`
+- microphone and Apple Events usage descriptions
 
-- `~/.local/bin/uv`
-- `/opt/homebrew/bin/uv`
-- `/usr/local/bin/uv`
+The release pipeline creates an unsigned arm64 archive first. It then signs in
+this order with Developer ID Application, `--options runtime`, and a secure
+timestamp:
 
-If `uv` is missing, it falls back to common `python3` locations. That fallback is useful for local debugging only: it does not install or lock Python dependencies. Public builds should use a managed or bundled `uv` path so dependency resolution stays reproducible.
+1. Every Mach-O file inside the app, including bundled `uv`, native libraries,
+   and executables.
+2. Nested frameworks, XPC services, app extensions, bundles, plugins, and apps,
+   depth-first.
+3. `Magic Voice.app` last, with `magic-voice.entitlements`.
+4. The finished DMG container.
 
-The selected distribution strategy is a signed, bundled `uv` executable. On first run, the app copies `uv` and the locked sidecar project into Application Support and runs `uv sync --frozen` to provision Python 3.12 and its environment. The bundled `uv` artifact still needs to be supplied and signed by the release pipeline before publishing a binary, then tested on a clean macOS account.
+The verifier runs `codesign --verify --deep --strict`, checks each Mach-O has a
+Developer ID signature from the app's Team ID, Hardened Runtime, and a secure
+timestamp, and fails if the app contains `com.apple.security.get-task-allow`.
+It also confirms the required runtime resources and arm64 `uv` are present.
 
-## Third-Party Licenses
+Do not use ad-hoc signing for a production artifact and do not replace this
+ordering with `codesign --deep --sign`; `--deep` is a verification convenience,
+not a safe signing strategy.
 
-Before publishing a source or binary release, add a license inventory for:
+## Library-validation tradeoff
 
-- Swift/macOS platform requirements.
-- Python packages from `sidecar/pyproject.toml` and `sidecar/uv.lock`.
-- The default Hugging Face model (`mlx-community/nemotron-3.5-asr-streaming-0.6b`) and the low-memory variant.
-- `uv`, if bundled or installed by the app.
+`magic-voice.entitlements` intentionally enables
+`com.apple.security.cs.disable-library-validation`. The managed environment is
+created after installation and includes MLX, NumPy, and other native `.so` or
+`.dylib` code that cannot be Developer ID signed by this build pipeline. Without
+this entitlement, Hardened Runtime may prevent the sidecar from loading those
+downloaded libraries.
 
-The repository license covers this project's source code. It does not automatically grant redistribution rights for downloaded models, Python packages, or bundled runtime tools.
+This weakens one Hardened Runtime protection: code loaded by the app's process
+tree does not have to be signed by the same Apple team. It does not disable the
+rest of Hardened Runtime, and the release pipeline still signs all native code
+that is present inside the shipped app. Removing the entitlement requires a new
+runtime design that embeds and signs every native dependency before distribution.
 
-## Privacy and System Side Effects
+## One-time signing setup
 
-Release notes and onboarding should disclose:
-
-- Audio and transcription run locally after model/dependency download.
-- First use downloads Python dependencies and the selected STT model.
-- The fallback injector temporarily replaces the clipboard and restores it after paste.
-- The fn activation-key path temporarily changes the user-wide `com.apple.HIToolbox AppleFnUsageType` preference to avoid Apple Dictation conflicts, then restores the saved value on normal release and next-launch recovery.
-
-## Signing and Notarization
-
-Use a Developer ID Application certificate for distribution outside the App Store.
+Install a valid **Developer ID Application** certificate in the signing
+keychain. Confirm the exact identity without exporting private key material:
 
 ```sh
-xcodebuild -project magic-voice.xcodeproj -scheme magic-voice -configuration Release archive
+security find-identity -v -p codesigning
 ```
 
-After archiving, export a Developer ID app, then notarize and staple the exported `.app` or `.dmg` with `notarytool` and `stapler`.
+Store notarization credentials in Keychain. Omitting `--password` makes
+`notarytool` prompt instead of placing the app-specific password in shell history:
 
-## Smoke Test Before Shipping
+```sh
+xcrun notarytool store-credentials "magic-voice-notary" \
+  --apple-id "release@example.com" \
+  --team-id "YOURTEAMID"
+```
 
-- Launch app: no Dock icon, menu bar icon appears.
-- Permissions: Microphone and Accessibility show granted.
-- Hotkey: double-tap the selected activation key starts/stops toggle recording; holding it runs push-to-talk.
-- Hotkey: verify global activation from another app on real hardware with Accessibility granted.
-- fn key: if using the fn activation key, verify the original Apple Dictation / input-source behavior is restored after pause, quit, force quit plus relaunch, and crash recovery.
-- Audio: saved recording is `16k-mono-f32.wav` and plays back clearly.
-- STT: sidecar starts with selected Nemotron model and returns transcript.
-- STT: model download progress does not hang and errors surface clearly.
-- STT: canceling a recording does not poison the next recording session.
-- Injection: delayed and real dictation injection preserve the previous clipboard.
+The scripts accept only that Keychain profile name. They do not accept, export,
+or print Apple passwords, private keys, or App Store Connect API secrets.
+
+## Release commands
+
+First exercise all local control flow without network, certificates, or Apple
+credentials:
+
+```sh
+scripts/test_release_scripts.sh
+scripts/release_macos.sh --dry-run
+```
+
+Acquire and inspect the exact pinned runtime independently when needed:
+
+```sh
+scripts/fetch_uv.sh --output dist/runtime/uv
+shasum -a 256 dist/runtime/uv
+file dist/runtime/uv
+```
+
+For a real release, supply non-secret identifiers through the environment and
+run the complete pipeline:
+
+```sh
+export MARKETING_VERSION="1.0.0"
+export BUILD_NUMBER="100"
+export DEVELOPER_ID_APPLICATION="Developer ID Application: Example Company (YOURTEAMID)"
+export NOTARYTOOL_PROFILE="magic-voice-notary"
+
+scripts/release_macos.sh
+```
+
+The fixed output names are:
+
+```text
+dist/archive/Magic-Voice-<version>-<build>.xcarchive
+dist/release/Magic-Voice-<version>-<build>.dmg
+dist/release/Magic-Voice-<version>-<build>.dmg.notary-result.json
+```
+
+The top-level script refuses to overwrite an existing archive or DMG. The DMG
+always contains exactly `Magic Voice.app` and an `Applications` symlink with
+normalized staging timestamps. Secure timestamps and filesystem metadata mean
+the signed DMG is not byte-for-byte reproducible, but its name and layout are
+deterministic for a given version and build number.
+
+Stages can also be audited or rerun individually:
+
+```sh
+scripts/sign_macos_release.sh \
+  "dist/archive/Magic-Voice-1.0.0-100.xcarchive/Products/Applications/Magic Voice.app"
+
+scripts/verify_macos_release.sh \
+  "dist/archive/Magic-Voice-1.0.0-100.xcarchive/Products/Applications/Magic Voice.app"
+
+scripts/package_macos_release.sh \
+  --output "dist/release/Magic-Voice-1.0.0-100.dmg" \
+  "dist/archive/Magic-Voice-1.0.0-100.xcarchive/Products/Applications/Magic Voice.app"
+
+scripts/notarize_macos_release.sh \
+  "dist/release/Magic-Voice-1.0.0-100.dmg"
+```
+
+After acceptance, the notarization stage runs `stapler staple`, `stapler
+validate`, and:
+
+```sh
+spctl --assess --type open --context context:primary-signature --verbose=4 \
+  "dist/release/Magic-Voice-1.0.0-100.dmg"
+```
+
+## Bundled-resource verification
+
+Before signing, or from the archived app, verify the release-only injection:
+
+```sh
+APP="dist/archive/Magic-Voice-1.0.0-100.xcarchive/Products/Applications/Magic Voice.app"
+test -f "$APP/Contents/Resources/sidecar.py"
+test -f "$APP/Contents/Resources/pyproject.toml"
+test -f "$APP/Contents/Resources/uv.lock"
+test -x "$APP/Contents/Resources/uv"
+lipo -archs "$APP/Contents/Resources/uv"
+```
+
+After signing, use the repository verifier and inspect entitlements explicitly:
+
+```sh
+scripts/verify_macos_release.sh "$APP"
+codesign -d --entitlements :- "$APP"
+```
+
+The entitlement output must include
+`com.apple.security.cs.disable-library-validation`, and must not include
+`com.apple.security.get-task-allow`.
+
+## Third-party license gate
+
+Before publishing, create and review a redistributable license/notices inventory
+for all shipped or downloaded components, including:
+
+- the pinned `uv` executable and its license/notices;
+- Python 3.12 downloaded by `uv`;
+- every direct and transitive package in `sidecar/uv.lock`, especially native
+  MLX, NumPy, audio, codec, and Hugging Face components;
+- `mlx-community/nemotron-3.5-asr-streaming-0.6b` and the low-memory model variant,
+  including model-card terms, weights license, attribution, and acceptable use;
+- any bundled Apple-platform assets or third-party notices added later.
+
+The repository's MIT license covers Magic Voice source. It does not grant rights
+to redistribute `uv`, Python, downloaded packages, or model weights. A successful
+notarization is a malware/signature check, not a license approval.
+
+## Clean-account smoke checklist
+
+Run this on a separate Apple Silicon Mac or fresh macOS account that has never
+installed Magic Voice, `uv`, Homebrew Python, the model, or the sidecar packages.
+Do not claim release readiness from the developer account alone.
+
+- Confirm the DMG passes the `spctl` command above and has a valid stapled ticket.
+- Mount the DMG, confirm it contains one `Magic Voice.app` and the Applications
+  shortcut, then drag the app to `/Applications` and launch it from Finder.
+- Confirm Gatekeeper opens the app without an override and the app has no Dock
+  icon while its menu-bar item appears.
+- Confirm the installed app contains executable arm64
+  `Contents/Resources/uv` plus `sidecar.py`, `pyproject.toml`, and `uv.lock`.
+- With no system `uv` or Python available, begin first-run setup. Confirm the app
+  downloads managed Python 3.12 and exactly the frozen dependencies, reports
+  progress, and reaches ready state. Test retry after interrupting the network.
+- Confirm the selected Nemotron model downloads, progress does not hang, and the
+  model/license disclosure matches the actual artifact. Budget roughly 1.2 GB
+  for the default model plus Python, packages, and caches.
+- Grant Microphone and Accessibility permissions. Verify hold-to-talk and
+  double-tap toggle from another app on real hardware.
+- Verify final text is inserted only once. Force Accessibility fallback and
+  confirm every original clipboard item is restored after success and failure.
+- With `fn` selected, verify the original `AppleFnUsageType` behavior returns
+  after pause, normal quit, force quit plus relaunch, and crash recovery.
+- Cancel one transcription and immediately complete another; no stale event may
+  appear. Quit during model/runtime work and confirm no sidecar or `uv` process
+  remains orphaned.
+- Restart the Mac/account and repeat launch and dictation from `/Applications`.
+  Confirm no developer checkout path, Homebrew tool, or Xcode environment is used.
+
+Record the macOS version, hardware, DMG SHA-256, signing Team ID, notarization
+submission ID, model IDs/licenses, and checklist result with the release record.
