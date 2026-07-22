@@ -60,6 +60,7 @@ app_path="$1"
 
 if [[ "$dry_run" == true ]]; then
     echo "Would sign every nested Mach-O in: $app_path"
+    echo "Required helper: Contents/MacOS/MagicVoiceProcessSupervisor (arm64 Mach-O)"
     echo "Would re-sign nested bundles depth-first, then sign the app last."
     echo "Policy: Developer ID Application, --timestamp, --options runtime"
     echo "App entitlements: $entitlements_path"

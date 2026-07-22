@@ -49,7 +49,8 @@ done
 target_path="$1"
 if [[ "$dry_run" == true ]]; then
     echo "Would verify Developer ID signatures, timestamps, Hardened Runtime,"
-    echo "production entitlements, and bundled runtime resources in: $target_path"
+    echo "production entitlements, bundled runtime resources, and the signed"
+    echo "arm64 MagicVoiceProcessSupervisor in: $target_path"
     exit 0
 fi
 
@@ -117,6 +118,8 @@ if [[ -n "$dmg_team_identifier" && "$dmg_team_identifier" != "$team_identifier" 
 fi
 
 native_code_count=0
+supervisor_path="$app_path/Contents/MacOS/MagicVoiceProcessSupervisor"
+supervisor_signature_verified=false
 while IFS= read -r -d '' candidate; do
     file_type="$(file -b "$candidate" 2>/dev/null || true)"
     [[ "$file_type" == Mach-O* ]] || continue
@@ -131,9 +134,14 @@ while IFS= read -r -d '' candidate; do
         release_fail "native code lacks Hardened Runtime: $candidate"
     [[ "$candidate_signature" == *"Timestamp="* ]] || \
         release_fail "native code has no secure timestamp: $candidate"
+    if [[ "$candidate" -ef "$supervisor_path" ]]; then
+        supervisor_signature_verified=true
+    fi
     native_code_count=$((native_code_count + 1))
 done < <(find "$app_path" -type f -print0)
 ((native_code_count > 0)) || release_fail "app contains no Mach-O code"
+[[ "$supervisor_signature_verified" == true ]] || \
+    release_fail "process supervisor did not pass Developer ID signature verification"
 
 app_entitlements="$(codesign -d --entitlements :- "$app_path" 2>/dev/null || true)"
 [[ "$app_entitlements" != *"com.apple.security.get-task-allow"* ]] || \

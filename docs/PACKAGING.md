@@ -10,14 +10,19 @@ fallback, and the Python sidecar process do not fit the current sandbox design.
 
 ## Release architecture
 
-The app bundles four runtime resources at the top of `Contents/Resources`:
+The app bundles four runtime resources at the top of `Contents/Resources` and a
+native process supervisor beside the main executable:
 
 ```text
-Magic Voice.app/Contents/Resources/
-  sidecar.py
-  pyproject.toml
-  uv.lock
-  uv
+Magic Voice.app/Contents/
+  MacOS/
+    Magic Voice
+    MagicVoiceProcessSupervisor
+  Resources/
+    sidecar.py
+    pyproject.toml
+    uv.lock
+    uv
 ```
 
 `ManagedRuntimeProvisioner` resolves those exact `Bundle.main` resource names.
@@ -29,6 +34,27 @@ on a clean machine; they are not embedded in the DMG.
 The `uv` executable is deliberately not committed or added to Xcode's Copy
 Bundle Resources phase. `scripts/release_macos.sh` downloads it, verifies it,
 injects it at `Contents/Resources/uv`, and signs it before signing the app.
+
+`MagicVoiceProcessSupervisor` is a native Xcode target embedded in the app. It
+launches each owned command as the leader of a dedicated process group while
+preserving the command's standard streams. The production sidecar, one-shot
+model download, app sidecar smoke path, and managed-runtime provisioning all go
+through this helper; therefore the group includes any `uv`, Python, and deeper
+worker descendants created by those paths.
+
+The helper registers `EVFILT_PROC`/`NOTE_EXIT` with `kqueue` for the exact Magic
+Voice parent PID before it launches the worker. This avoids PID polling and PID
+reuse races. If that parent crashes or is Force Quit, the helper sends `SIGTERM`
+to the entire worker process group, waits three seconds, then sends `SIGKILL` to
+the group and reaps its direct child. The helper exits after cleanup; it is not a
+persistent daemon. This boundary covers descendants launched through the helper,
+not unrelated processes, power loss, or an operating-system crash.
+
+Normal app termination is cooperative first: Magic Voice sends the sidecar's
+JSON `shutdown` message and returns `terminateLater` while bounded teardown runs.
+If the worker does not exit, terminating the helper invokes the same process-group
+`SIGTERM`/three-second/`SIGKILL` sequence. This termination deferral is important:
+do not replace it with cleanup that depends only on object deinitialization.
 
 ## Fixed release inputs
 
@@ -68,8 +94,9 @@ The release pipeline creates an unsigned arm64 archive first. It then signs in
 this order with Developer ID Application, `--options runtime`, and a secure
 timestamp:
 
-1. Every Mach-O file inside the app, including bundled `uv`, native libraries,
-   and executables.
+1. Every Mach-O file inside the app, including bundled `uv`,
+   `Contents/MacOS/MagicVoiceProcessSupervisor`, native libraries, and other
+   executables.
 2. Nested frameworks, XPC services, app extensions, bundles, plugins, and apps,
    depth-first.
 3. `Magic Voice.app` last, with `magic-voice.entitlements`.
@@ -78,7 +105,10 @@ timestamp:
 The verifier runs `codesign --verify --deep --strict`, checks each Mach-O has a
 Developer ID signature from the app's Team ID, Hardened Runtime, and a secure
 timestamp, and fails if the app contains `com.apple.security.get-task-allow`.
-It also confirms the required runtime resources and arm64 `uv` are present.
+It separately requires the named process supervisor to be an executable arm64
+Mach-O and records that this exact path passed the per-file Developer ID checks;
+finding some other signed Mach-O is not sufficient. It also confirms the
+required runtime resources and arm64 `uv` are present.
 
 Do not use ad-hoc signing for a production artifact and do not replace this
 ordering with `codesign --deep --sign`; `--deep` is a verification convenience,
@@ -199,7 +229,10 @@ test -f "$APP/Contents/Resources/sidecar.py"
 test -f "$APP/Contents/Resources/pyproject.toml"
 test -f "$APP/Contents/Resources/uv.lock"
 test -x "$APP/Contents/Resources/uv"
+test -x "$APP/Contents/MacOS/MagicVoiceProcessSupervisor"
+file "$APP/Contents/MacOS/MagicVoiceProcessSupervisor"
 lipo -archs "$APP/Contents/Resources/uv"
+lipo -archs "$APP/Contents/MacOS/MagicVoiceProcessSupervisor"
 ```
 
 After signing, use the repository verifier and inspect entitlements explicitly:
@@ -207,6 +240,9 @@ After signing, use the repository verifier and inspect entitlements explicitly:
 ```sh
 scripts/verify_macos_release.sh "$APP"
 codesign -d --entitlements :- "$APP"
+codesign --verify --strict --verbose=2 \
+  "$APP/Contents/MacOS/MagicVoiceProcessSupervisor"
+codesign -dvvv "$APP/Contents/MacOS/MagicVoiceProcessSupervisor"
 ```
 
 The entitlement output must include
@@ -242,7 +278,9 @@ Do not claim release readiness from the developer account alone.
 - Confirm Gatekeeper opens the app without an override and the app has no Dock
   icon while its menu-bar item appears.
 - Confirm the installed app contains executable arm64
-  `Contents/Resources/uv` plus `sidecar.py`, `pyproject.toml`, and `uv.lock`.
+  `Contents/Resources/uv`, an executable arm64 and Developer ID-signed
+  `Contents/MacOS/MagicVoiceProcessSupervisor`, plus `sidecar.py`,
+  `pyproject.toml`, and `uv.lock`.
 - With no system `uv` or Python available, begin first-run setup. Confirm the app
   downloads managed Python 3.12 and exactly the frozen dependencies, reports
   progress, and reaches ready state. Test retry after interrupting the network.
@@ -256,8 +294,11 @@ Do not claim release readiness from the developer account alone.
 - With `fn` selected, verify the original `AppleFnUsageType` behavior returns
   after pause, normal quit, force quit plus relaunch, and crash recovery.
 - Cancel one transcription and immediately complete another; no stale event may
-  appear. Quit during model/runtime work and confirm no sidecar or `uv` process
-  remains orphaned.
+  appear. Quit during the main sidecar, one-shot model download, app smoke, and
+  managed-runtime provisioning paths and confirm no supervisor, sidecar, `uv`,
+  Python, or deeper worker remains orphaned. Repeat with Force Quit and the
+  repository host-death fixture; descendants that ignore `SIGTERM` must be gone
+  after the three-second grace and `SIGKILL` escalation.
 - Restart the Mac/account and repeat launch and dictation from `/Applications`.
   Confirm no developer checkout path, Homebrew tool, or Xcode environment is used.
 
