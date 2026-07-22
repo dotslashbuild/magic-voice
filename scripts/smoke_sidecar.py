@@ -2,8 +2,8 @@
 """Protocol smoke test for the Magic Voice STT sidecar.
 
 Boots sidecar.py directly, streams a WAV through the
-JSONLines streaming protocol (start_stream / audio_chunk / finish_stream),
-and asserts that a non-empty transcript comes back. Exits non-zero on any
+JSONLines streaming protocol (start_stream / audio_chunk / finish_stream /
+cancel_stream), and asserts that a non-empty transcript comes back. Exits non-zero on any
 protocol violation, so it can gate CI and catch regressions in the
 Swift <-> sidecar contract.
 
@@ -104,6 +104,16 @@ def send(process: subprocess.Popen, message: dict) -> None:
     process.stdin.flush()
 
 
+def assert_no_event(process: subprocess.Popen, timeout: float) -> None:
+    assert process.stdout is not None
+    ready, _, _ = select.select([process.stdout], [], [], timeout)
+    if ready:
+        line = process.stdout.readline().strip()
+        fail(f"cancelled stream emitted a later event: {line!r}")
+    if process.poll() is not None:
+        fail(f"sidecar exited after cancel_stream with code {process.returncode}")
+
+
 def main() -> int:
     if len(sys.argv) > 1:
         wav_path = Path(sys.argv[1])
@@ -129,6 +139,32 @@ def main() -> int:
         if event.get("type") != "status" or event.get("state") != "booted":
             fail(f"expected booted status, got {event}")
         print("booted ok")
+
+        send(process, {"type": "ping"})
+        event = read_event(process, 5)
+        if event.get("type") != "pong":
+            fail(f"expected pong, got {event}")
+        print("readiness ping ok")
+
+        cancelled_request_id = "smoke-cancelled"
+        send(process, {"type": "start_stream", "request_id": cancelled_request_id})
+        while True:
+            event = read_event(process, BOOT_TIMEOUT)
+            if event.get("type") == "started":
+                break
+            if event.get("type") == "status":
+                print(f"status: {event.get('state')}")
+                continue
+            fail(f"expected cancelled stream to start, got {event}")
+        send(process, {"type": "cancel_stream", "request_id": cancelled_request_id})
+        send(process, {"type": "finish_stream", "request_id": cancelled_request_id})
+        send(process, {
+            "type": "audio_chunk",
+            "request_id": cancelled_request_id,
+            "data": base64.b64encode(samples[:4]).decode(),
+        })
+        assert_no_event(process, 1.0)
+        print("cancel_stream suppressed later events ok")
 
         request_id = "smoke-test"
         send(process, {"type": "start_stream", "request_id": request_id})

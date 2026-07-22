@@ -17,6 +17,7 @@ struct MagicVoiceApp: App {
     @StateObject private var dictationSession: DictationSession
     @StateObject private var textInjector: TextInjector
     @StateObject private var transcriptionEngine: SidecarTranscriptionEngine
+    @StateObject private var runtimeProvisioner: ManagedRuntimeProvisioner
     @StateObject private var loginItemController: LoginItemController
 
     init() {
@@ -27,6 +28,7 @@ struct MagicVoiceApp: App {
         audioCaptureManager.selectedInputDeviceID = settings.selectedMicrophoneID
         let textInjector = TextInjector(permissionController: permissionController)
         let transcriptionEngine = SidecarTranscriptionEngine()
+        let runtimeProvisioner = ManagedRuntimeProvisioner()
         let dictationSession = DictationSession(
             settings: settings,
             notchManager: notchManager,
@@ -46,9 +48,17 @@ struct MagicVoiceApp: App {
         _audioCaptureManager = StateObject(wrappedValue: audioCaptureManager)
         _textInjector = StateObject(wrappedValue: textInjector)
         _transcriptionEngine = StateObject(wrappedValue: transcriptionEngine)
+        _runtimeProvisioner = StateObject(wrappedValue: runtimeProvisioner)
         _dictationSession = StateObject(wrappedValue: dictationSession)
 
         Task { @MainActor in
+            if runtimeProvisioner.requiresProvisioning {
+                let result = await runtimeProvisioner.provision()
+                guard result == .provisioned || result == .alreadyProvisioned else {
+                    dictationSession.startHotkeyMonitoringOnLaunch()
+                    return
+                }
+            }
             transcriptionEngine.startEngine(
                 model: settings.selectedModel,
                 language: settings.language
@@ -67,6 +77,7 @@ struct MagicVoiceApp: App {
                 .environmentObject(dictationSession)
                 .environmentObject(textInjector)
                 .environmentObject(transcriptionEngine)
+                .environmentObject(runtimeProvisioner)
         } label: {
             Image(nsImage: MenuBarGlyph.image(for: MenuBarStatusModel.glyph(
                 notchActive: notchManager.state != .collapsed,

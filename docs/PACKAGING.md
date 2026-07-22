@@ -7,8 +7,9 @@ This project is a direct-distribution macOS app. It should not be shipped with A
 - Product name/display name: `Magic Voice`
 - Current project deployment target: macOS 26.2
 - Intended public deployment target: verify before release and keep this file, README, and Xcode settings in sync
-- App Sandbox: Off. The current project has no sandbox entitlement file.
+- App Sandbox: Off.
 - Hardened Runtime: enable before Developer ID distribution. The current project file does not declare a hardened-runtime setting.
+- Library validation: disabled in `magic-voice.entitlements` so the future hardened app can load MLX/NumPy native libraries from the managed environment in Application Support.
 - `LSUIElement`: `YES`
 - `NSMicrophoneUsageDescription`: `Magic Voice uses your microphone to transcribe speech locally on your device.`
 - `NSAppleEventsUsageDescription`: `Magic Voice uses Accessibility to insert transcribed text into the active text field.`
@@ -21,7 +22,7 @@ Before public packaging, add these files to the app target's Copy Bundle Resourc
 - `sidecar/pyproject.toml`
 - `sidecar/uv.lock`
 
-The current project already includes `sidecar.py` and `pyproject.toml` as resources, but not `uv.lock`. The Swift sidecar launcher first looks in `Bundle.main` for `sidecar.py`, then falls back to the local source tree for developer builds. The managed runtime copies `sidecar.py`, `pyproject.toml`, and `uv.lock` together before launching `uv run --frozen`; packaged builds must include all three files or the sidecar can fail before transcription starts.
+The project includes `sidecar.py`, `pyproject.toml`, and `uv.lock` as resources. The Swift sidecar launcher first looks in `Bundle.main` for `sidecar.py`, then falls back to the local source tree for developer builds. The managed runtime copies all three files together before launching `uv run --frozen`; packaged builds must include all three files or the sidecar can fail before transcription starts.
 
 ## Python Runtime
 
@@ -34,14 +35,7 @@ Developer builds resolve the sidecar launch plan through `SidecarRuntimeLocator`
 
 If `uv` is missing, it falls back to common `python3` locations. That fallback is useful for local debugging only: it does not install or lock Python dependencies. Public builds should use a managed or bundled `uv` path so dependency resolution stays reproducible.
 
-For a public build, choose one distribution strategy before notarization:
-
-- Bundle a signed Python runtime and virtual environment inside the app.
-- Bundle a signed `uv` executable and let the app create a managed Python/venv under Application Support.
-- Ship a first-run installer/bootstrapper that installs `uv` and resolves dependencies after explicit user consent.
-- Replace the Python sidecar with a native Swift/Core ML runtime later.
-
-Do not publish a binary until this decision is implemented and tested on a clean macOS account.
+The selected distribution strategy is a signed, bundled `uv` executable. On first run, the app copies `uv` and the locked sidecar project into Application Support and runs `uv sync --frozen` to provision Python 3.12 and its environment. The bundled `uv` artifact still needs to be supplied and signed by the release pipeline before publishing a binary, then tested on a clean macOS account.
 
 ## Third-Party Licenses
 

@@ -19,6 +19,7 @@ struct MenuBarStatus: Equatable {
     enum Banner: Equatable {
         case permissions(missing: [PermissionKind])
         case engine(message: String)
+        case runtime(message: String, canRetry: Bool)
     }
 
     let statusWord: String
@@ -37,12 +38,17 @@ enum MenuBarStatusModel {
         missingPermissions: [PermissionKind],
         engineState: TranscriptionEngineState,
         engineErrorReason: String?,
+        runtimeProvisioningState: ManagedRuntimeProvisioningState = .ready,
         notchActive: Bool,
         monitoringEnabled: Bool
     ) -> MenuBarStatus {
         let banner: MenuBarStatus.Banner?
         if !missingPermissions.isEmpty {
             banner = .permissions(missing: missingPermissions)
+        } else if case .provisioning(let progress) = runtimeProvisioningState {
+            banner = .runtime(message: progress.rawValue, canRetry: false)
+        } else if case .failed(let message) = runtimeProvisioningState {
+            banner = .runtime(message: message, canRetry: true)
         } else if engineState == .unavailable {
             banner = .engine(message: engineErrorReason ?? "Transcription engine unavailable")
         } else {
@@ -52,6 +58,8 @@ enum MenuBarStatusModel {
         let statusWord: String
         if notchActive {
             statusWord = "Recording"
+        } else if case .provisioning = runtimeProvisioningState, missingPermissions.isEmpty {
+            statusWord = "Setting Up"
         } else if banner != nil {
             statusWord = "Error"
         } else {

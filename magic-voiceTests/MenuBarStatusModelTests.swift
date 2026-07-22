@@ -102,6 +102,39 @@ struct MenuBarStatusModelTests {
     }
 
     @Test
+    func provisioningRuntimeExplainsSetupWithoutRetry() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            engineState: .idle,
+            engineErrorReason: nil,
+            runtimeProvisioningState: .provisioning(.synchronizingEnvironment),
+            notchActive: false,
+            monitoringEnabled: true
+        )
+
+        #expect(status.statusWord == "Setting Up")
+        #expect(status.banner == .runtime(
+            message: "Downloading transcription dependencies…",
+            canRetry: false
+        ))
+    }
+
+    @Test
+    func failedRuntimeProvidesRetryBannerBeforeEngineError() {
+        let status = MenuBarStatusModel.derive(
+            missingPermissions: [],
+            engineState: .unavailable,
+            engineErrorReason: "engine error",
+            runtimeProvisioningState: .failed(message: "Runtime setup failed: offline"),
+            notchActive: false,
+            monitoringEnabled: true
+        )
+
+        #expect(status.statusWord == "Error")
+        #expect(status.banner == .runtime(message: "Runtime setup failed: offline", canRetry: true))
+    }
+
+    @Test
     func startingEngineStatesShowNoBanner() {
         for state in [TranscriptionEngineState.idle, .starting, .loadingModel, .transcribing] {
             let status = MenuBarStatusModel.derive(

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		243B05F72F5D845700798C35 /* sidecar.py in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F52F5D845700798C35 /* sidecar.py */; };
 		243B05F82F5D845700798C35 /* pyproject.toml in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F62F5D845700798C35 /* pyproject.toml */; };
+		243B05FA2F5D845700798C36 /* uv.lock in Resources */ = {isa = PBXBuildFile; fileRef = 243B05F92F5D845700798C36 /* uv.lock */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -25,6 +26,7 @@
 		243B05F12F5D845700798C35 /* Magic Voice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Magic Voice.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		243B05F52F5D845700798C35 /* sidecar.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = sidecar.py; sourceTree = "<group>"; };
 		243B05F62F5D845700798C35 /* pyproject.toml */ = {isa = PBXFileReference; lastKnownFileType = text; path = pyproject.toml; sourceTree = "<group>"; };
+		243B05F92F5D845700798C36 /* uv.lock */ = {isa = PBXFileReference; lastKnownFileType = text; path = uv.lock; sourceTree = "<group>"; };
 		AA1B05000000000000000001 /* magic-voiceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "magic-voiceTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -79,6 +81,7 @@
 			children = (
 				243B05F52F5D845700798C35 /* sidecar.py */,
 				243B05F62F5D845700798C35 /* pyproject.toml */,
+				243B05F92F5D845700798C36 /* uv.lock */,
 			);
 			path = sidecar;
 			sourceTree = "<group>";
@@ -170,6 +173,7 @@
 			files = (
 				243B05F72F5D845700798C35 /* sidecar.py in Resources */,
 				243B05F82F5D845700798C35 /* pyproject.toml in Resources */,
+				243B05FA2F5D845700798C36 /* uv.lock in Resources */,
 			);
 		};
 		AA1B05000000000000000012 /* Resources */ = {
@@ -321,6 +325,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_ENTITLEMENTS = "magic-voice/magic-voice.entitlements";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 24PULD53RP;
@@ -369,6 +374,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
+				CODE_SIGN_ENTITLEMENTS = "magic-voice/magic-voice.entitlements";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 24PULD53RP;

@@ -26,7 +26,7 @@ Hold `fn` to dictate. Double-tap `fn` to start and stop. Keep writing.
 | Permissions | Microphone and Accessibility only |
 | Privacy | No audio upload in the current local engine path |
 | Menu bar | Compact control center, recent transcripts, microphone/language/shortcut pickers |
-| Runtime | Developer `uv` flow works; packaged runtime is still pending |
+| Runtime | Developer `uv` flow works; managed first-run provisioning is implemented |
 
 ## Quick Start
 
@@ -128,7 +128,7 @@ docs/               Packaging notes and design plans
 
 ## Release Status
 
-The source repo is usable for local development. Public binary distribution still needs a packaging pass: deployment target check, bundled sidecar resources, runtime strategy, notarization, smoke test, and third-party license inventory.
+The source repo is usable for local development. The app can provision a bundled `uv` runtime into Application Support on first launch; the release pipeline still needs to supply and sign that `uv` artifact. Public binary distribution also needs notarization, a packaging smoke test, and a third-party license inventory.
 
 See [docs/PACKAGING.md](docs/PACKAGING.md) before shipping.
 

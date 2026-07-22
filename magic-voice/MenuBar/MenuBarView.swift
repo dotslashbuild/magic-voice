@@ -15,6 +15,7 @@ struct MenuBarView: View {
     @EnvironmentObject private var audioCaptureManager: AudioCaptureManager
     @EnvironmentObject private var dictationSession: DictationSession
     @EnvironmentObject private var transcriptionEngine: SidecarTranscriptionEngine
+    @EnvironmentObject private var runtimeProvisioner: ManagedRuntimeProvisioner
 
     @State private var showPermissionDetails = false
     @State private var copiedEntryID: UUID?
@@ -26,6 +27,7 @@ struct MenuBarView: View {
             },
             engineState: transcriptionEngine.engineState,
             engineErrorReason: transcriptionEngine.lastErrorReason,
+            runtimeProvisioningState: runtimeProvisioner.state,
             notchActive: notchManager.state != .collapsed,
             monitoringEnabled: dictationSession.hotkeyMonitoringEnabled
         )
@@ -110,6 +112,29 @@ struct MenuBarView: View {
                         )
                     }
                     .controlSize(.small)
+                }
+
+            case .runtime(let message, let canRetry):
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: canRetry ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath")
+                        .foregroundStyle(canRetry ? .orange : .secondary)
+                    Text(message)
+                        .font(.callout)
+                        .lineLimit(3)
+                    Spacer()
+                    if canRetry {
+                        Button("Retry") {
+                            Task { @MainActor in
+                                let result = await runtimeProvisioner.provision()
+                                guard result == .provisioned || result == .alreadyProvisioned else { return }
+                                transcriptionEngine.restartEngine(
+                                    model: settings.selectedModel,
+                                    language: settings.language
+                                )
+                            }
+                        }
+                        .controlSize(.small)
+                    }
                 }
             }
         }
@@ -291,6 +316,7 @@ struct MenuBarView: View {
         .environmentObject(permissionController)
         .environmentObject(audioCaptureManager)
         .environmentObject(transcriptionEngine)
+        .environmentObject(ManagedRuntimeProvisioner())
         .environmentObject(DictationSession(
             settings: settings,
             notchManager: notchManager,
