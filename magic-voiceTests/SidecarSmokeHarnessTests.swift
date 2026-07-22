@@ -42,6 +42,26 @@ struct SidecarSmokeHarnessTests {
     }
 
     @Test
+    func sidecarModeStopsAfterReadinessWithoutStartingAStream() async {
+        let process = FakeSmokeProcess(
+            messages: [SidecarJSONLinesMessage(type: "pong")],
+            exitBehavior: .graceful
+        )
+        let sink = FakeSmokeExitSink()
+
+        let result = await makeHarness(
+            process: process,
+            sink: sink,
+            launchMode: .sidecar
+        ).run()
+
+        #expect(result.passed)
+        #expect(result.reason == "runtime launch and readiness verified")
+        #expect(await process.sentMessages.map(\.type) == ["ping"])
+        #expect(await process.actions == [.sendGracefulShutdown, .markTerminated])
+    }
+
+    @Test
     func noPongReportsUnavailableAndStillTearsDown() async {
         let process = FakeSmokeProcess(messages: [], exitBehavior: .graceful)
         let sink = FakeSmokeExitSink()
@@ -144,6 +164,7 @@ struct SidecarSmokeHarnessTests {
     private func makeHarness(
         process: FakeSmokeProcess,
         sink: FakeSmokeExitSink,
+        launchMode: SidecarSmokeLaunchMode = .lifecycle,
         clock: any SidecarReadinessClock = SuspendingSmokeClock()
     ) -> SidecarSmokeHarness {
         SidecarSmokeHarness(
@@ -151,6 +172,7 @@ struct SidecarSmokeHarnessTests {
             process: process,
             clock: clock,
             exitSink: sink,
+            launchMode: launchMode,
             scriptURL: scriptURL,
             requestID: "request",
             readinessTimeout: .seconds(5),

@@ -57,6 +57,7 @@ final class SidecarSmokeHarness {
     private let process: any SidecarSmokeProcess
     private let clock: any SidecarReadinessClock
     private let exitSink: any SidecarSmokeExitSinking
+    private let launchMode: SidecarSmokeLaunchMode
     private let scriptURL: URL
     private let model: STTModel
     private let language: String
@@ -70,6 +71,7 @@ final class SidecarSmokeHarness {
         process: any SidecarSmokeProcess,
         clock: any SidecarReadinessClock,
         exitSink: any SidecarSmokeExitSinking,
+        launchMode: SidecarSmokeLaunchMode = .lifecycle,
         scriptURL: URL,
         model: STTModel = .nemotronStreaming06B,
         language: String = "en",
@@ -82,6 +84,7 @@ final class SidecarSmokeHarness {
         self.process = process
         self.clock = clock
         self.exitSink = exitSink
+        self.launchMode = launchMode
         self.scriptURL = scriptURL
         self.model = model
         self.language = language
@@ -130,6 +133,10 @@ final class SidecarSmokeHarness {
                 return .failure("sidecar unavailable: \(reason)")
             }
             return .failure("sidecar unavailable")
+        }
+
+        guard launchMode == .lifecycle else {
+            return .success("runtime launch and readiness verified")
         }
 
         do {
@@ -392,6 +399,7 @@ private enum SidecarSmokeProcessError: LocalizedError {
 
 @MainActor
 func makeProductionSidecarSmokeHarness(
+    launchMode: SidecarSmokeLaunchMode = .lifecycle,
     exitSink: (any SidecarSmokeExitSinking)? = nil
 ) -> SidecarSmokeHarness? {
     guard let scriptURL = sidecarSmokeScriptURL() else { return nil }
@@ -400,6 +408,7 @@ func makeProductionSidecarSmokeHarness(
         process: FoundationSidecarSmokeProcess(),
         clock: ContinuousSidecarReadinessClock(),
         exitSink: exitSink ?? StandardSidecarSmokeExitSink(),
+        launchMode: launchMode,
         scriptURL: scriptURL
     )
 }

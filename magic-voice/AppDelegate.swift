@@ -15,19 +15,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        guard parseSidecarSmokeLaunchMode(arguments: ProcessInfo.processInfo.arguments) != nil else {
+        guard let launchMode = parseSidecarSmokeLaunchMode(
+            arguments: ProcessInfo.processInfo.arguments
+        ) else {
             return
         }
 
-        guard let harness = makeProductionSidecarSmokeHarness() else {
-            StandardSidecarSmokeExitSink().finish(with: SidecarSmokeResult(
-                passed: false,
-                reason: "sidecar.py not found in the app bundle"
-            ))
-            return
-        }
+        Task { @MainActor in
+            let sink = StandardSidecarSmokeExitSink()
+            let provisioner = ManagedRuntimeProvisioner()
+            if provisioner.requiresProvisioning {
+                let provisioningResult = await provisioner.provision()
+                guard provisioningResult == .provisioned
+                        || provisioningResult == .alreadyProvisioned else {
+                    let reason: String
+                    if case .failed(let message) = provisioningResult {
+                        reason = message
+                    } else {
+                        reason = "managed runtime provisioning did not complete"
+                    }
+                    sink.finish(with: SidecarSmokeResult(
+                        passed: false,
+                        reason: "runtime provisioning failed: \(reason)"
+                    ))
+                    return
+                }
+            }
 
-        Task { await harness.run() }
+            guard let harness = makeProductionSidecarSmokeHarness(
+                launchMode: launchMode,
+                exitSink: sink
+            ) else {
+                sink.finish(with: SidecarSmokeResult(
+                    passed: false,
+                    reason: "sidecar.py not found in the app bundle"
+                ))
+                return
+            }
+
+            await harness.run()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
